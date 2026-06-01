@@ -180,6 +180,21 @@ function generateChatworkMessage() {
     return; 
   }
 
+  // --- ★追加: 開院日マスタの読み込み ---
+  const openDateMap = new Map();
+  try {
+    const extSS = SpreadsheetApp.openById('14RbsDcv0nXfEwweki8-9cK3lQUg1XUuhozLNF9u2qAs');
+    const extData = extSS.getSheetByName('拠点名').getDataRange().getValues();
+    for (let i = 1; i < extData.length; i++) {
+      if (extData[i][0] && extData[i][7] instanceof Date) {
+        openDateMap.set(extData[i][0], extData[i][7]);
+      }
+    }
+  } catch (e) {
+    Logger.log('開院日マスタの読み込みに失敗しましたが、処理を続行します: ' + e.message);
+  }
+  // ------------------------------------
+
   // --- 0. 変則営業データの読み込み ---
   const irregularMap = {}; 
   if (irregularSheet) {
@@ -347,6 +362,15 @@ function generateChatworkMessage() {
     let totalRequiredMinutes = 0;
     
     sortedClinicList.forEach(clinic => {
+        // ★追加: 開院日チェック (分母)
+        if (openDateMap.has(clinic)) {
+            const openDate = openDateMap.get(clinic);
+            openDate.setHours(0, 0, 0, 0);
+            const checkDate = new Date(d);
+            checkDate.setHours(0, 0, 0, 0);
+            if (checkDate < openDate) return; // 開院日より前ならスキップ
+        }
+
         if (clinic.includes("内科")) return; 
         
         let closedTime = closedDataMap.get(`${dateKey}_${clinic}`) || closedDataMap.get(`${dateKey}_全拠点`);
@@ -386,6 +410,15 @@ function generateChatworkMessage() {
 
     // 純粋不在のあぶり出し注入
     sortedClinicList.forEach(clinic => {
+        // ★追加: 開院日チェック (分子)
+        if (openDateMap.has(clinic)) {
+            const openDate = openDateMap.get(clinic);
+            openDate.setHours(0, 0, 0, 0);
+            const checkDate = new Date(d);
+            checkDate.setHours(0, 0, 0, 0);
+            if (checkDate < openDate) return; // 開院日より前ならスキップ
+        }
+
         if (clinic.includes("内科")) return; 
 
         let closedTime = closedDataMap.get(`${dateKey}_${clinic}`) || closedDataMap.get(`${dateKey}_全拠点`);

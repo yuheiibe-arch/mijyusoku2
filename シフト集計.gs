@@ -275,20 +275,27 @@ function applyConditionalFormatting_CellSpecific() {
   }
   dataRange.setBackgrounds(backgroundColors);
 }
-
 function setupDateSelection() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName('文章自動作成');
   const sourceSheet = ss.getSheetByName('確認用');
   if (!sheet || !sourceSheet) return;
 
-  const today = new Date();
-  const sevenDaysLater = new Date();
-  sevenDaysLater.setDate(today.getDate() + 7);
+  // --- 15時以降は「明日」を起点とするロジック ---
+  const baseDate = new Date();
+  const currentHour = baseDate.getHours();
+  
+  if (currentHour >= 15) {
+    baseDate.setDate(baseDate.getDate() + 1); // 15時以降なら1日進める（明日）
+  }
+
+  const endDate = new Date(baseDate);
+  endDate.setDate(baseDate.getDate() + 6); // 起点日から6日後（計7日間の1週間分）
 
   const weekdaysJP = ["日", "月", "火", "水", "木", "金", "土"];
-  const formattedToday = Utilities.formatDate(today, Session.getScriptTimeZone(), 'yyyy/MM/dd') + `（${weekdaysJP[today.getDay()]}）`;
-  const formattedSevenDaysLater = Utilities.formatDate(sevenDaysLater, Session.getScriptTimeZone(), 'yyyy/MM/dd') + `（${weekdaysJP[sevenDaysLater.getDay()]}）`;
+  const formattedStart = Utilities.formatDate(baseDate, Session.getScriptTimeZone(), 'yyyy/MM/dd') + `（${weekdaysJP[baseDate.getDay()]}）`;
+  const formattedEnd = Utilities.formatDate(endDate, Session.getScriptTimeZone(), 'yyyy/MM/dd') + `（${weekdaysJP[endDate.getDay()]}）`;
+  // ----------------------------------------------
 
   const lastRow = sourceSheet.getLastRow();
   if (lastRow < 2) return;
@@ -302,6 +309,8 @@ function setupDateSelection() {
   if (uniqueValues.length === 0) return;
 
   const rule = SpreadsheetApp.newDataValidation().requireValueInList(uniqueValues, true).setAllowInvalid(false).build();
-  sheet.getRange('B2').setDataValidation(null).setValue(formattedToday).setDataValidation(rule);
-  sheet.getRange('B4').setDataValidation(null).setValue(formattedSevenDaysLater).setDataValidation(rule);
+  sheet.getRange('B2').setDataValidation(null).setValue(formattedStart).setDataValidation(rule);
+  sheet.getRange('B4').setDataValidation(null).setValue(formattedEnd).setDataValidation(rule);
+  
+  Logger.log(`期間設定完了: ${formattedStart} 〜 ${formattedEnd}`);
 }
