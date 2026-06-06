@@ -298,17 +298,28 @@ function setupDateSelection() {
   // ----------------------------------------------
 
   const lastRow = sourceSheet.getLastRow();
-  if (lastRow < 2) return;
+  let uniqueValues = [];
 
-  const bColumnValues = sourceSheet.getRange(2, 2, lastRow - 1, 1).getValues().flat();
-  const uniqueValues = [...new Set(bColumnValues.filter(Boolean))].map(dateStr => {
-    const dateObj = new Date(dateStr);
-    return isNaN(dateObj.getTime()) ? dateStr : Utilities.formatDate(dateObj, Session.getScriptTimeZone(), 'yyyy/MM/dd') + `（${weekdaysJP[dateObj.getDay()]}）`;
-  });
+  if (lastRow >= 2) {
+    const bColumnValues = sourceSheet.getRange(2, 2, lastRow - 1, 1).getValues().flat();
+    uniqueValues = [...new Set(bColumnValues.filter(Boolean))].map(dateStr => {
+      const dateObj = new Date(dateStr);
+      return isNaN(dateObj.getTime()) ? dateStr : Utilities.formatDate(dateObj, Session.getScriptTimeZone(), 'yyyy/MM/dd') + `（${weekdaysJP[dateObj.getDay()]}）`;
+    });
+  }
+
+  // ★ 修正点1: エラー(入力規則違反)を防ぐため、セットする日付がリストになければ強制的に追加する
+  if (!uniqueValues.includes(formattedStart)) uniqueValues.unshift(formattedStart);
+  if (!uniqueValues.includes(formattedEnd)) uniqueValues.push(formattedEnd);
 
   if (uniqueValues.length === 0) return;
 
-  const rule = SpreadsheetApp.newDataValidation().requireValueInList(uniqueValues, true).setAllowInvalid(false).build();
+  // ★ 修正点2: setAllowInvalid(true) に変更し、ポップアップエラーで処理をブロックしないようにする
+  const rule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(uniqueValues, true)
+    .setAllowInvalid(true) 
+    .build();
+
   sheet.getRange('B2').setDataValidation(null).setValue(formattedStart).setDataValidation(rule);
   sheet.getRange('B4').setDataValidation(null).setValue(formattedEnd).setDataValidation(rule);
   

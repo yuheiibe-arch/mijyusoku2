@@ -155,8 +155,6 @@ function removeClosedTime(mergedTimeStr, closedTime) {
     }
     return validRanges.join('/');
 }
-
-
 // ==========================================
 // メイン処理関数
 // ==========================================
@@ -434,6 +432,16 @@ function generateChatworkMessage() {
     });
 
     for (const normName in groupedFuzai) {
+        // ▼▼▼ ★追加: 開院日チェック (最終出力前フィルター) ▼▼▼
+        if (openDateMap.has(normName)) {
+            const openDate = openDateMap.get(normName);
+            openDate.setHours(0, 0, 0, 0);
+            const checkDate = new Date(d);
+            checkDate.setHours(0, 0, 0, 0);
+            if (checkDate < openDate) continue; // 開院日より前ならスキップ（ここで確実に出力を防ぎます）
+        }
+        // ▲▲▲ 追加ここまで ▲▲▲
+
         let closedTime = null;
         if (normName.includes("内科")) {
              closedTime = closedDataMap.get(`${dateKey}_${normName}`) || closedDataMap.get(`${dateKey}_${normName}_内科`) || closedDataMap.get(`${dateKey}_全拠点`);
