@@ -1,5 +1,5 @@
 // ==========================================
-// 【最終確定版】本番用スクリプト (純粋不在・部分休館・昼休み連結表示 対応)
+// 【最終確定版】本番用スクリプト (純粋不在・部分休館・昼休み連結表示・15時自動日付切替 対応)
 // ==========================================
 
 /**
@@ -155,6 +155,7 @@ function removeClosedTime(mergedTimeStr, closedTime) {
     }
     return validRanges.join('/');
 }
+
 // ==========================================
 // メイン処理関数
 // ==========================================
@@ -178,14 +179,62 @@ function generateChatworkMessage() {
     return; 
   }
 
-  // --- ★追加: 開院日マスタの読み込み ---
+  // --- 🌟【追加要件】15:00以降は「明日」を起点とする日付自動設定ロジック ---
+  const baseDate = new Date();
+  const currentHour = baseDate.getHours();
+  
+  if (currentHour >= 15) {
+    baseDate.setDate(baseDate.getDate() + 1); // 15時以降なら1日進める（明日）
+  }
+  const endDateCalc = new Date(baseDate);
+  endDateCalc.setDate(baseDate.getDate() + 7); // 起点日から7日後までの1週間分
+
+  const formattedStart = Utilities.formatDate(baseDate, scriptTimeZone, 'yyyy/MM/dd') + `（${weekdaysJP[baseDate.getDay()]}）`;
+  const formattedEnd = Utilities.formatDate(endDateCalc, scriptTimeZone, 'yyyy/MM/dd') + `（${weekdaysJP[endDateCalc.getDay()]}）`;
+
+  // 「確認用」シートのB列からユニークな日付リストを取得してプルダウンの網羅性を担保（エラー防止）
+  let uniqueValues = [];
+  if (sourceSheet.getLastRow() >= 2) {
+    const bColumnValues = sourceSheet.getRange(2, 2, sourceSheet.getLastRow() - 1, 1).getValues().flat();
+    uniqueValues = [...new Set(bColumnValues.filter(Boolean))].map(dateStr => {
+      const dateObj = new Date(dateStr);
+      return isNaN(dateObj.getTime()) ? dateStr : Utilities.formatDate(dateObj, scriptTimeZone, 'yyyy/MM/dd') + `（${weekdaysJP[dateObj.getDay()]}）`;
+    });
+  }
+  if (!uniqueValues.includes(formattedStart)) uniqueValues.unshift(formattedStart);
+  if (!uniqueValues.includes(formattedEnd)) uniqueValues.push(formattedEnd);
+
+  const rule = SpreadsheetApp.newDataValidation().requireValueInList(uniqueValues, true).setAllowInvalid(true).build();
+  
+  // B2とB4セルを時間帯に応じた日付に自動更新し、プルダウンを適用
+  targetSheet.getRange('B2').setDataValidation(null).setValue(formattedStart).setDataValidation(rule);
+  targetSheet.getRange('B4').setDataValidation(null).setValue(formattedEnd).setDataValidation(rule);
+  // ------------------------------------------------------------------
+
+  // --- ★追加: 開院日マスタの読み込み（表記ゆれA〜E列対応版） ---
   const openDateMap = new Map();
   try {
     const extSS = SpreadsheetApp.openById('14RbsDcv0nXfEwweki8-9cK3lQUg1XUuhozLNF9u2qAs');
     const extData = extSS.getSheetByName('拠点名').getDataRange().getValues();
+    
     for (let i = 1; i < extData.length; i++) {
-      if (extData[i][0] && extData[i][7] instanceof Date) {
-        openDateMap.set(extData[i][0], extData[i][7]);
+      const openDate = extData[i][7]; // H列: 開院日
+      
+      if (openDate instanceof Date) {
+        // A列(正規記載) 〜 E列(表記揺れ4) の名称をすべて同じ開院日と紐付ける
+        const namesToRegister = [
+          extData[i][0], // A列
+          extData[i][1], // B列
+          extData[i][2], // C列
+          extData[i][3], // D列
+          extData[i][4]  // E列
+        ];
+        
+        namesToRegister.forEach(name => {
+          if (name && String(name).trim() !== "") {
+            openDateMap.set(String(name).trim(), openDate);
+          }
+        });
       }
     }
   } catch (e) {
@@ -319,6 +368,7 @@ function generateChatworkMessage() {
   // --- 3. メイン処理 ---
   targetSheet.getRange('A6').clearContent();
 
+  // 自動更新されたB2とB4セルの値を読み込む
   const startDateRaw = targetSheet.getRange('B2').getValue(); 
   const endDateRaw = targetSheet.getRange('B4').getValue();   
   const startDate = parseDateToSafeDateObj(startDateRaw);
@@ -360,7 +410,7 @@ function generateChatworkMessage() {
     let totalRequiredMinutes = 0;
     
     sortedClinicList.forEach(clinic => {
-        // ★追加: 開院日チェック (分母)
+        // 開院日チェック (分母)
         if (openDateMap.has(clinic)) {
             const openDate = openDateMap.get(clinic);
             openDate.setHours(0, 0, 0, 0);
@@ -408,7 +458,7 @@ function generateChatworkMessage() {
 
     // 純粋不在のあぶり出し注入
     sortedClinicList.forEach(clinic => {
-        // ★追加: 開院日チェック (分子)
+        // 開院日チェック (分子)
         if (openDateMap.has(clinic)) {
             const openDate = openDateMap.get(clinic);
             openDate.setHours(0, 0, 0, 0);
@@ -432,15 +482,14 @@ function generateChatworkMessage() {
     });
 
     for (const normName in groupedFuzai) {
-        // ▼▼▼ ★追加: 開院日チェック (最終出力前フィルター) ▼▼▼
+        // 開院日チェック (最終出力前フィルター)
         if (openDateMap.has(normName)) {
             const openDate = openDateMap.get(normName);
             openDate.setHours(0, 0, 0, 0);
             const checkDate = new Date(d);
             checkDate.setHours(0, 0, 0, 0);
-            if (checkDate < openDate) continue; // 開院日より前ならスキップ（ここで確実に出力を防ぎます）
+            if (checkDate < openDate) continue; // 開院日より前ならスキップ
         }
-        // ▲▲▲ 追加ここまで ▲▲▲
 
         let closedTime = null;
         if (normName.includes("内科")) {
@@ -489,12 +538,11 @@ function generateChatworkMessage() {
                 totalGapMinutes += calculateTotalMinutesFromStr(finalTimeStr);
             }
 
-            // ★ 【追加】昼休み（13:00-15:00）を跨いでまるごと不在の場合、見た目だけを綺麗に連結する
+            // ★ 昼休み（13:00-15:00）を跨いでまるごと不在の場合、見た目だけを綺麗に連結する
             let displayTimeStr = finalTimeStr;
-            // A枠・B枠を通しで不在なら、間の休憩時間を表記から消して繋げる
             if (displayTimeStr.startsWith("09:00-13:00/15:00-")) {
                 displayTimeStr = displayTimeStr.replace("09:00-13:00/15:00-", "09:00-");
-            } else if (displayTimeStr.startsWith("10:00-13:00/15:00-")) { // 年末年始などの10時出勤考慮
+            } else if (displayTimeStr.startsWith("10:00-13:00/15:00-")) { 
                 displayTimeStr = displayTimeStr.replace("10:00-13:00/15:00-", "10:00-");
             }
 
