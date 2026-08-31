@@ -49,6 +49,32 @@ function generateChatworkMessage() {
     Logger.log('追加データソースの読み込みに失敗しました: ' + e.message);
   }
 
+  // --- ★追加: COO室依頼２診要望データの読み込み ---
+  const COO_SS_ID = '1Ky5fXKvEWFodUwcu-HnHKiOBn6zdb090j79OjI6KNtk';
+  const cooDataByDate = {};
+  try {
+    const cooSS = SpreadsheetApp.openById(COO_SS_ID);
+    const cooSheet = cooSS.getSheetByName("２診要望一覧");
+    if (cooSheet && cooSheet.getLastRow() > 1) {
+      const cooRaw = cooSheet.getDataRange().getDisplayValues().slice(1);
+      cooRaw.forEach(row => {
+        const clinic = String(row[0] || "").replace(/[（(]小児科[）)]/, "").trim();
+        const dStrRaw = String(row[1] || "").trim().split(/[（(]/)[0].trim().replace(/-/g, '/');
+        const parts = dStrRaw.split('/');
+        if (parts.length >= 3) {
+          const dObj = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+          if (!isNaN(dObj.getTime())) {
+            const dStr = fastFormatDate(dObj);
+            if (!cooDataByDate[dStr]) cooDataByDate[dStr] = [];
+            cooDataByDate[dStr].push(row);
+          }
+        }
+      });
+    }
+  } catch (e) {
+    Logger.log('COO要望一覧の読み込みに失敗しました: ' + e.message);
+  }
+
   // --- シート取得 ---
   const sourceSheet = ss.getSheetByName('確認用');
   const targetSheet = ss.getSheetByName('文章自動作成');
@@ -58,7 +84,7 @@ function generateChatworkMessage() {
   const irregularSheet = ss.getSheetByName('変則営業');
 
   if (!sourceSheet || !targetSheet || !mentionSheet || !ishiFuzaiSheet) { 
-    ui.alert('エラー: 必要なシートが見つかりません。'); 
+    if (ui) ui.alert('エラー: 必要なシートが見つかりません。'); 
     return; 
   }
 
@@ -105,11 +131,11 @@ function generateChatworkMessage() {
   const endDate = parseDateToSafeDateObj(endDateRaw);
 
   if (!startDate || !endDate || startDate > endDate) {
-    ui.alert(`日付指定が無効です。\n開始: ${startDateRaw}\n終了: ${endDateRaw}`); 
+    if (ui) ui.alert(`日付指定が無効です。\n開始: ${startDateRaw}\n終了: ${endDateRaw}`); 
     return; 
   }
 
-  // --- ★追加: 開院日マスタ・エリアマスタの読み込み ---
+  // --- 開院日マスタ・エリアマスタの読み込み ---
   const openDateMap = new Map();
   const areaMap = {}; 
   try {
@@ -141,27 +167,25 @@ function generateChatworkMessage() {
     Logger.log('開院日マスタの読み込みに失敗: ' + e.message);
   }
 
-  // --- 0. 変則営業データの読み込み (★修正: カンマ区切り・全拠点対応) ---
+  // --- 0. 変則営業データの読み込み ---
   const irregularMap = {}; 
   if (irregularSheet) {
     const iData = irregularSheet.getDataRange().getValues();
     for (let i = 1; i < iData.length; i++) {
       const row = iData[i];
       const dateObj = parseDateToSafeDateObj(row[0]); 
-      const timeRangeStr = row[1]; // 例: "09:00-12:30,15:00-21:00"
+      const timeRangeStr = row[1];
       const clinicName = row[2] ? String(row[2]).trim() : "";
 
       if (dateObj && timeRangeStr && clinicName) {
         const dateKey = fastFormatDate(dateObj);
-        
-        // カンマやスラッシュで複数区間に分割して配列化
         const rangesStr = String(timeRangeStr).split(/[,/、]/);
         const validRanges = [];
         for (let rStr of rangesStr) {
           const parts = rStr.split('-');
           if (parts.length === 2) {
-            const openMin = parseTimeToMinutes(parts[0]);
-            const closeMin = parseTimeToMinutes(parts[1]);
+            const openMin = safeParseTime(parts[0]);
+            const closeMin = safeParseTime(parts[1]);
             if (!isNaN(openMin) && !isNaN(closeMin) && openMin < closeMin) {
               validRanges.push({ open: openMin, close: closeMin });
             }
@@ -170,7 +194,6 @@ function generateChatworkMessage() {
         
         if (validRanges.length > 0) {
            const normName = normalizeClinicName(clinicName);
-           // 全拠点を指定された場合、特別なキーで保存する
            if (normName === "全拠点") {
                irregularMap[`${dateKey}_全拠点`] = validRanges;
            } else {
@@ -287,7 +310,6 @@ function generateChatworkMessage() {
   const formattedHours = String(hours).padStart(2, '0');
   const formattedReportDate = `${now.getMonth() + 1}月${now.getDate()}日（${weekdaysJP[now.getDay()]}）`;
   
-  // 冒頭メンションと挨拶ブロック
   let initialText = `【未充足報告】${formattedReportDate} ${formattedHours}:${minutes}時点\n\n`;
 
   let mentionsArray = [], ccArray = [];
@@ -303,18 +325,29 @@ function generateChatworkMessage() {
   let hasAnyContent = false;
   let dailyText = "";
 
-  // ★ 週間集計用変数
+  // ★ 週間・月間集計用変数
   let weeklyReq1st = 0, weeklyFilled1st = 0, weeklyGapMin = 0;
   let weeklyReq2nd = 0, weeklyFilled2nd = 0;
+  let weeklyCooReqMin = 0, weeklyCooFilledMin = 0;
   let weeklyAbsenceClinics = []; 
 
-  for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+  let monthlyReq1st = 0, monthlyFilled1st = 0, monthlyGapMin = 0;
+  let monthlyReq2nd = 0, monthlyFilled2nd = 0;
+  let monthlyCooReqMin = 0, monthlyCooFilledMin = 0;
+  let monthlyAbsenceCount = 0;
+
+  const loopStart = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+  const loopEnd = new Date(Math.max(endDate.getTime(), new Date(startDate.getFullYear(), startDate.getMonth() + 1, 0).getTime()));
+
+  for (let d = new Date(loopStart); d <= loopEnd; d.setDate(d.getDate() + 1)) {
+    const isWeekly = (d.getTime() >= startDate.getTime() && d.getTime() <= endDate.getTime());
+    const isMonthly = (d.getFullYear() === startDate.getFullYear() && d.getMonth() === startDate.getMonth());
+
+    if (!isWeekly && !isMonthly) continue;
+
     const dateKey = fastFormatDate(d);
     const dateTitle = `${d.getMonth() + 1}月${d.getDate()}日（${weekdaysJP[d.getDay()]}）`;
-
-    const month = d.getMonth() + 1;
-    const day = d.getDate();
-    const isSpecialDay = (month === 12 && day === 31) || (month === 1 && day <= 3);
+    const isSpecialDay = (d.getMonth() + 1 === 12 && d.getDate() === 31) || (d.getMonth() + 1 === 1 && d.getDate() <= 3);
 
     let totalRequiredMinutes = 0;
     
@@ -345,7 +378,6 @@ function generateChatworkMessage() {
         else if (closedTime === "夜間") reqMin -= 3 * 60;
         else if (closedTime === "午後夜間") reqMin -= 6 * 60;
 
-        // ★修正: 変則営業の必要時間（分母）を配列から合算、全拠点も参照
         const irregularRule = irregularMap[`${dateKey}_${clinic}`] || irregularMap[`${dateKey}_全拠点`];
         if (irregularRule) {
             reqMin = 0;
@@ -405,19 +437,18 @@ function generateChatworkMessage() {
         }
         if (closedTime === "全日") continue; 
 
-        let mergedTimeStr = normalizeAndMergeTimes(groupedFuzai[normName], isSpecialDay);
+        let mergedTimeStr = safeNormalizeAndMerge(groupedFuzai[normName], isSpecialDay);
         
         if (mergedTimeStr) {
             let finalTimeStr = mergedTimeStr;
 
-            if (closedTime) finalTimeStr = removeClosedTime(finalTimeStr, closedTime);
+            if (closedTime) finalTimeStr = safeRemoveClosed(finalTimeStr, closedTime);
             if (!finalTimeStr) continue;
 
             if (!isSpecialDay && normName.includes("北葛西")) {
                  finalTimeStr = finalTimeStr.replace("21:00", "20:00");
             }
             
-            // ★修正: 変則営業の許可区間（分子）と重なる部分だけを不在として抽出
             const irregularRule = irregularMap[`${dateKey}_${normName}`] || irregularMap[`${dateKey}_全拠点`];
             if (irregularRule) {
                  const ranges = finalTimeStr.split('/');
@@ -425,15 +456,13 @@ function generateChatworkMessage() {
                  for (const range of ranges) {
                      const parts = range.split('-');
                      if (parts.length === 2) {
-                         const s = parseTimeToMinutes(parts[0]);
-                         const e = parseTimeToMinutes(parts[1]);
-                         
-                         // すべての許可区間との重なりを判定
+                         const s = safeParseTime(parts[0]);
+                         const e = safeParseTime(parts[1]);
                          for (const r of irregularRule) {
                              const adjustedS = Math.max(s, r.open);
                              const adjustedE = Math.min(e, r.close);
                              if (adjustedS < adjustedE) {
-                                 validRanges.push(`${formatMinutesToHHMM(adjustedS)}-${formatMinutesToHHMM(adjustedE)}`);
+                                 validRanges.push(`${safeFormatTime(adjustedS)}-${safeFormatTime(adjustedE)}`);
                              }
                          }
                      }
@@ -443,7 +472,7 @@ function generateChatworkMessage() {
             }
 
             if (!normName.includes("内科")) {
-                totalGapMinutes += calculateTotalMinutesFromStr(finalTimeStr);
+                totalGapMinutes += safeCalcTotalMin(finalTimeStr);
             }
 
             let displayTimeStr = finalTimeStr;
@@ -456,11 +485,15 @@ function generateChatworkMessage() {
             let record = dailyRecords.find(r => r.normName === normName);
             let displayName = record ? record.name : (rawNameMap[normName] || normName);
             
-            dailyOutputLines.push(`【${displayName}】${displayTimeStr}`);
-            
-            // ★ 集計用配列にオブジェクトとして追加（科名も保持）
             const currentDepartment = record && record.isInternalMedicine ? "内科" : (displayName.includes("内科") ? "内科" : "小児科");
-            weeklyAbsenceClinics.push({ clinic: normName, dept: currentDepartment });
+            
+            if (isWeekly) {
+                dailyOutputLines.push(`【${displayName}】${displayTimeStr}`);
+                weeklyAbsenceClinics.push({ clinic: normName, dept: currentDepartment });
+            }
+            if (isMonthly) {
+                monthlyAbsenceCount++;
+            }
         }
     }
 
@@ -469,105 +502,134 @@ function generateChatworkMessage() {
     const requiredHours = Math.round(totalRequiredMinutes / 60);
     const filledHours = Math.round(totalFilledMinutes / 60);
 
-    // --- 日次データから全体充足率・２診目充足率の計算 ---
     const dailyExtData = extDataByDate[dateKey] || { paste: [], oubo: [], bosyu: [] };
     const advMetrics = calculateAdvancedMetricsFast(dailyExtData.paste, dailyExtData.oubo, dailyExtData.bosyu);
 
-    // ★ 週間集計用データの蓄積
-    weeklyReq1st += totalRequiredMinutes;
-    weeklyFilled1st += totalFilledMinutes;
-    weeklyGapMin += totalGapMinutes;
-    weeklyReq2nd += advMetrics.secondReqMin;
-    weeklyFilled2nd += advMetrics.secondActualMin;
+    let dailyCooReqMin = 0;
+    let dailyCooFilledMin = 0;
 
-    // --- 出力テキスト生成 ---
-    if (totalRequiredMinutes > 0) {
-        let entry = `[info][title]${dateTitle}[/title]`;
-        if (backupInfoMap[dateKey]) entry += backupInfoMap[dateKey];
+    if (cooDataByDate[dateKey]) {
+      const covMap = {};
+      const getCov = (c) => { if (!covMap[c]) covMap[c] = new Array(1440).fill(0); return covMap[c]; };
 
-        entry += `[hr]\n`;
-        entry += `小児科１診目充足率：${rate}%（応募：${filledHours}h/募集：${requiredHours}h）\n`;
+      dailyExtData.paste.forEach(row => {
+        const doc = String(row[0] || "").trim();
+        const clinic = String(row[12] || "").replace(/[（(]小児科[）)]/, "").trim();
+        if (!doc || !clinic || doc.includes("バックアップ") || doc.includes("有給") || doc.includes("欠勤")) return;
+        const startMin = safeParseTime(row[15]);
+        const endMin = safeParseTime(row[19]);
+        if (!isNaN(startMin) && !isNaN(endMin) && startMin < endMin) {
+          const cov = getCov(clinic);
+          for (let m = startMin; m < endMin; m++) cov[m]++;
+        }
+      });
+
+      dailyExtData.oubo.forEach(row => {
+        const doc = String(row[0] || "").trim();
+        const clinic = String(row[3] || "").replace(/[（(]小児科[）)]/, "").trim();
+        if (!doc || !clinic || clinic.includes("バックアップ")) return;
+        if (doc.replace(/\s+/g, '') === "橋本浩") return;
+        const startMin = safeParseTime(row[6]);
+        const endMin = safeParseTime(row[7]);
+        if (!isNaN(startMin) && !isNaN(endMin) && startMin < endMin) {
+          const cov = getCov(clinic);
+          for (let m = startMin; m < endMin; m++) cov[m]++;
+        }
+      });
+
+      cooDataByDate[dateKey].forEach(row => {
+        const clinic = String(row[0] || "").replace(/[（(]小児科[）)]/, "").trim();
+        const startMin = safeParseTime(row[2]);
+        const endMin = safeParseTime(row[3]);
+        if (!isNaN(startMin) && !isNaN(endMin) && startMin < endMin) {
+          dailyCooReqMin += (endMin - startMin);
+          if (covMap[clinic]) {
+            const cov = covMap[clinic];
+            for (let m = startMin; m < endMin; m++) {
+              if (cov[m] >= 2) dailyCooFilledMin++;
+            }
+          }
+        }
+      });
+    }
+
+    if (isWeekly) {
+        weeklyReq1st += totalRequiredMinutes;
+        weeklyFilled1st += totalFilledMinutes;
+        weeklyGapMin += totalGapMinutes;
+        weeklyReq2nd += advMetrics.secondReqMin;
+        weeklyFilled2nd += advMetrics.secondActualMin;
+        weeklyCooReqMin += dailyCooReqMin;
+        weeklyCooFilledMin += dailyCooFilledMin;
         
-        if (isExtSsLoaded) {
-            entry += `募集全体充足率：${advMetrics.overallRate}%（応募：${advMetrics.overallActualH}h/募集：${advMetrics.overallReqH}h）\n`;
-            entry += `２診目充足率：${advMetrics.secondRate}%（応募：${advMetrics.secondActualH}h/募集：${advMetrics.secondReqH}h）\n`;
+        if (totalRequiredMinutes > 0) {
+            let entry = `[info][title]${dateTitle}[/title]`;
+            if (backupInfoMap[dateKey]) entry += backupInfoMap[dateKey];
+            entry += `[hr]\n`;
+            entry += `小児科１診目充足率：${rate}%（応募：${filledHours}h/募集：${requiredHours}h）\n`;
+            
+            if (isExtSsLoaded) {
+                entry += `募集全体充足率：${advMetrics.overallRate}%（応募：${advMetrics.overallActualH}h/募集：${advMetrics.overallReqH}h）\n`;
+                entry += `２診目充足率（全体）：${advMetrics.secondRate}%（応募：${advMetrics.secondActualH}h/募集：${advMetrics.secondReqH}h）\n`;
+                if (dailyCooReqMin > 0) {
+                    const dCooRate = Math.floor((dailyCooFilledMin / dailyCooReqMin) * 100);
+                    const dCooReqH = Math.round(dailyCooReqMin / 60);
+                    const dCooFilledH = Math.round(dailyCooFilledMin / 60);
+                    entry += `└COO室依頼２診：${dCooRate}%（応募：${dCooFilledH}h/募集：${dCooReqH}h）\n`;
+                }
+            }
+            entry += `\n`;
+            if (dailyOutputLines.length > 0) {
+                dailyOutputLines.sort();
+                entry += `＜医師不在拠点＞\n` + dailyOutputLines.join('\n') + '\n';
+            } else {
+                entry += `充足\n`;
+            }
+            entry += `[/info]\n`;
+            dailyText += entry;
+            hasAnyContent = true;
         }
-        entry += `\n`;
+    }
 
-        if (dailyOutputLines.length > 0) {
-            dailyOutputLines.sort();
-            entry += `＜医師不在拠点＞\n` + dailyOutputLines.join('\n') + '\n';
-        } else {
-            entry += `充足\n`;
-        }
-        entry += `[/info]\n`;
-        dailyText += entry;
-        hasAnyContent = true;
+    if (isMonthly) {
+        monthlyReq1st += totalRequiredMinutes;
+        monthlyFilled1st += totalFilledMinutes;
+        monthlyGapMin += totalGapMinutes;
+        monthlyReq2nd += advMetrics.secondReqMin;
+        monthlyFilled2nd += advMetrics.secondActualMin;
+        monthlyCooReqMin += dailyCooReqMin;
+        monthlyCooFilledMin += dailyCooFilledMin;
     }
   }
 
-  // --- 週間サマリーの生成と結合 ---
-  const wRate1st = weeklyReq1st > 0 ? Math.floor((weeklyFilled1st / weeklyReq1st) * 100) : 100;
-  const wReq1stH = Math.round(weeklyReq1st / 60);
-  const wFilled1stH = Math.round(weeklyFilled1st / 60);
+  // --- ★ SummaryBuilder.gs にデータを渡してテキストを構築 ---
+  const summaryParams = {
+    startDate: startDate,
+    endDate: endDate,
+    isExtSsLoaded: isExtSsLoaded,
+    hasCooData: (weeklyCooReqMin > 0 || Object.keys(cooDataByDate).length > 0),
+    weekly: {
+      req1st: weeklyReq1st, filled1st: weeklyFilled1st, gapMin: weeklyGapMin,
+      req2nd: weeklyReq2nd, filled2nd: weeklyFilled2nd,
+      cooReq: weeklyCooReqMin, cooFilled: weeklyCooFilledMin,
+      absenceClinics: weeklyAbsenceClinics
+    },
+    monthly: {
+      req1st: monthlyReq1st, filled1st: monthlyFilled1st, gapMin: monthlyGapMin,
+      req2nd: monthlyReq2nd, filled2nd: monthlyFilled2nd,
+      cooReq: monthlyCooReqMin, cooFilled: monthlyCooFilledMin,
+      absenceCount: monthlyAbsenceCount
+    },
+    areaMap: areaMap,
+    TARGET_SPLIT_CLINICS: ["北葛西", "西葛西"]
+  };
 
-  const wRate2nd = weeklyReq2nd > 0 ? Math.floor((weeklyFilled2nd / weeklyReq2nd) * 100) : 100;
-  const wReq2ndH = Math.round(weeklyReq2nd / 60);
-  const wFilled2ndH = Math.round(weeklyFilled2nd / 60);
-
-  const wGapHours = Math.round(weeklyGapMin / 60);
-  
-  // ★ エリアごとの集計ロジック
-  const areaCount = { "東京": [], "神奈川": [], "埼玉": [], "千葉": [], "茨城": [], "大阪": [] };
-  const TARGET_SPLIT_CLINICS = ["北葛西", "西葛西"];
-
-  weeklyAbsenceClinics.forEach(record => {
-    let displayName = record.clinic;
-    if (TARGET_SPLIT_CLINICS.includes(record.clinic) && record.dept) {
-      displayName = `${record.clinic}（${record.dept}）`;
-    }
-    const area = areaMap[record.clinic] || "その他";
-    if (!areaCount[area]) areaCount[area] = [];
-    areaCount[area].push(displayName);
-  });
-
-  let summaryText = `[info][title]週間医師充足数[/title]\n`;
-  summaryText += `計測期間：${fastFormatDate(startDate)}~${fastFormatDate(endDate)}\n`;
-  summaryText += `１診目充足率：${wRate1st}%（応募：${wFilled1stH}h/募集：${wReq1stH}h）\n`;
-  
-  if (isExtSsLoaded) {
-    summaryText += `２診目充足率：${wRate2nd}%（応募：${wFilled2ndH}h/募集：${wReq2ndH}h）\n`;
-  } else {
-    summaryText += `２診目充足率：取得エラー\n`;
-  }
-  
-  summaryText += `医師不在時間合計：${wGapHours}h\n`;
-  summaryText += `医師不在拠点箇所（延べ数）：${weeklyAbsenceClinics.length}\n`;
-
-  const kantouAreas = ["東京", "神奈川", "埼玉", "千葉", "茨城"];
-  kantouAreas.forEach(area => {
-    const clinics = areaCount[area] || [];
-    if (clinics.length > 0) {
-      const uniqueNames = [...new Set(clinics)];
-      summaryText += `${area}：${uniqueNames.length}拠点（${uniqueNames.join('、')}）\n`;
-    }
-  });
-
-  const osakaClinics = areaCount["大阪"] || [];
-  if (osakaClinics.length > 0) {
-    if (kantouAreas.some(a => (areaCount[a] || []).length > 0)) {
-      summaryText += `[hr]\n`;
-    }
-    const uniqueNames = [...new Set(osakaClinics)];
-    summaryText += `大阪：${uniqueNames.length}拠点（${uniqueNames.join('、')}）\n`;
-  }
-
-  summaryText += `[/info]\n\n`;
+  const summaryText = buildWeeklyMonthlySummaryText(summaryParams);
 
   if (!hasAnyContent) {
     dailyText = "対象期間内に報告すべきデータ（小児科）はありませんでした。\n";
   }
 
   targetSheet.getRange('A6').setValue(initialText + summaryText + dailyText);
-  SpreadsheetApp.getActiveSpreadsheet().toast('文章自動作成が完了しました。');
+  if (ui) ui.alert('文章自動作成が完了しました。'); 
 }
