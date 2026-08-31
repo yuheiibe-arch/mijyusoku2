@@ -1,228 +1,324 @@
-// ------------------------------------------------------------------------------------
-// グローバル設定に近い定数
-// ------------------------------------------------------------------------------------
-const SCRIPT_LOGGING_LEVEL = true; // trueで詳細ログ、falseで主要ログ
+// メインの更新関数
+function updateSheetRowAdjusted_CallingCellSpecificFormatting() {
+  const ss = SpreadsheetApp.openById('1cbeXWojsxNMhQUo1c6VflF5hLUJUyfuOXCFbGP5jJEA');
+  const sourceSheet = ss.getSheetByName('貼付用');
+  const targetSheet = ss.getSheetByName('確認用');
+  const DETAILED_LOGGING = true;
 
-const GLOBAL_STANDARD_SHIFT_ORDER = ["A", "B", "C"];
-const GLOBAL_SHIFT_TIMES_MIN = {
-  "北葛西小児科": { A: [9 * 60, 13 * 60], B: [15 * 60, 18 * 60], C: [18 * 60, 20 * 60] },
-  "北葛西内科": { A: [9 * 60, 13 * 60], B: [15 * 60, 18 * 60], C: [18 * 60, 20 * 60] },
-  "亀有小児科": { A: [9 * 60, 13 * 60], B: [15 * 60, 18 * 60], C: [18 * 60, 21 * 60] },
-  "亀有内科": { A: [9 * 60, 13 * 60], B: [15 * 60, 18 * 60], C: [18 * 60, 21 * 60] },
-  "その他": { A: [9 * 60, 13 * 60], B: [15 * 60, 18 * 60], C: [18 * 60, 21 * 60] }
-};
-
-// 除外リスト
-const GLOBAL_EXCLUDED_LOCATIONS = [
-  "有給", "欠勤", "院外勤務（小児科）", "院外勤務（内科）",
-  "【関東】バックアップシフト", "医師会・嘱託医業務（小児科）",
-  "医師会・嘱託医業務（内科）",
-  "医師会",
-  "医師会業務", 
-  "嘱託医業務"
-];
-
-const GLOBAL_EXCLUDED_DEPARTMENTS = [
-  "小児科ワクチン専任(対象：小児～成人)", "内科ワクチン専任(対象：小児～成人)"
-];
-const GLOBAL_TARGET_CLINICS_FOR_DEPT_INFO = ["北葛西", "亀有"];
-
-
-// ------------------------------------------------------------------------------------
-// ヘルパー関数群
-// ------------------------------------------------------------------------------------
-
-function parseDateToSafeDateObj(dateInput) {
-  if (!dateInput) return null;
-  if (dateInput instanceof Date) {
-    return new Date(dateInput.getFullYear(), dateInput.getMonth(), dateInput.getDate());
+  if (!sourceSheet || !targetSheet) {
+    SpreadsheetApp.getUi().alert('貼付用 または 確認用 シートが見つかりません。');
+    return;
   }
-  if (typeof dateInput !== 'string' && typeof dateInput.toString !== 'function') {
-    if (SCRIPT_LOGGING_LEVEL) Logger.log(`日付パース不可: 文字列でもDateオブジェクトでもない入力値 "[${dateInput}]"`);
-    return null;
+
+  // ▼▼▼ 修正点① ▼▼▼
+  // この関数内でのみ使用する、特別ルールを適用した除外リストを作成します。
+  // グローバルの除外リストから「【関東】バックアップシフト」だけを取り除きます。
+  const localExcludedLocations = (typeof GLOBAL_EXCLUDED_LOCATIONS !== 'undefined') 
+    ? GLOBAL_EXCLUDED_LOCATIONS.filter(item => item !== "【関東】バックアップシフト")
+    : [];
+  // ▲▲▲ 修正ここまで ▲▲▲
+
+  const data = sourceSheet.getDataRange().getValues();
+  const rows = data.slice(2);
+
+  if (rows.length === 0) {
+    SpreadsheetApp.getUi().alert('貼付用シートの3行目以降にデータが見つかりません。');
+    return;
   }
-  const dateStr = dateInput.toString();
-  const cleanedDateStr = dateStr.replace(/\s*（.*?）/, '').replace(/-/g, '/');
-  const parts = cleanedDateStr.split('/');
-  if (parts.length === 3) {
-    const year = parseInt(parts[0], 10);
-    const month = parseInt(parts[1], 10) - 1;
-    const day = parseInt(parts[2], 10);
-    if (!isNaN(year) && !isNaN(month) && !isNaN(day)) {
-      return new Date(year, month, day);
+
+  const EXCLUDED_DEPARTMENTS = [
+    "小児科ワクチン専任(対象：小児～成人)", "内科ワクチン専任(対象：小児～成人)"
+  ];
+  const TARGET_CLINICS_FOR_DEPT_SPLIT = ["北葛西", "亀有"];
+  const results = {};
+  const weekdays = ["日", "月", "火", "水", "木", "金", "土"];
+
+  rows.forEach((row, index) => {
+    const rowIndex = index + 3;
+    const doctorName = row[0] ? row[0].toString().trim() : '未設定';
+    const originalClinicName = row[12] ? row[12].toString().trim() : null;
+    const originalDepartment = row[13] ? row[13].toString().trim() : null;
+    const shiftDateRaw = row[14];
+    
+    // ▼▼▼ 修正箇所：参照列を BL, BM, BN に変更 (インデックス 63, 64, 65) ▼▼▼
+    const aShiftValue = row[63]; // BL列
+    const bShiftValue = row[64]; // BM列
+    const cShiftValue = row[65]; // BN列
+    // ▲▲▲ 修正ここまで ▲▲▲
+
+    // ▼▼▼ 修正点② ▼▼▼
+    // 除外判定を、グローバルリストの代わりに先ほど作成した「localExcludedLocations」で行います。
+    if ((originalClinicName && localExcludedLocations.includes(originalClinicName)) ||
+        (originalDepartment && EXCLUDED_DEPARTMENTS.includes(originalDepartment))) {
+    // ▲▲▲ 修正ここまで ▲▲▲
+      if (DETAILED_LOGGING) Logger.log(`行 ${rowIndex}: スキップ (理由: 除外項目該当) Clinic=${originalClinicName}, Dept=${originalDepartment}`);
+      return;
     }
-  }
-  if (SCRIPT_LOGGING_LEVEL) Logger.log(`日付パース失敗: 入力値 "[${dateInput}]", クリーンアップ後 "[${cleanedDateStr}]"`);
-  return null;
-}
-
-function parseTimeToMinutes(timeInput) {
-  if (timeInput instanceof Date) {
-    if (isNaN(timeInput.getTime())) return NaN;
-    return timeInput.getHours() * 60 + timeInput.getMinutes();
-  }
-  if (typeof timeInput === 'string') {
-    const parts = timeInput.split(':');
-    if (parts.length === 2) {
-      const hours = parseInt(parts[0], 10);
-      const minutes = parseInt(parts[1], 10);
-      if (!isNaN(hours) && !isNaN(minutes) && hours >= 0 && hours < 24 && minutes >= 0 && minutes < 60) {
-        return hours * 60 + minutes;
+    
+    if (!originalClinicName || !shiftDateRaw || !originalDepartment) {
+      if (DETAILED_LOGGING) Logger.log(`行 ${rowIndex}: スキップ (必須項目不足) Clinic=${originalClinicName}, Date=${shiftDateRaw}, Dept=${originalDepartment}`);
+      return;
+    }
+    let shiftDateObj, shiftDateKey;
+    try {
+      shiftDateObj = parseDateToSafeDateObj(shiftDateRaw); // ★強化版パースを利用
+      if (!shiftDateObj || isNaN(shiftDateObj.getTime())) {
+        Logger.log(`行 ${rowIndex}: スキップ (無効な日付形式: ${shiftDateRaw})`);
+        return;
       }
+      shiftDateKey = fastFormatDate(shiftDateObj).replace(/\//g, '-'); // ★爆速化
+    } catch (e) {
+      Logger.log(`行 ${rowIndex}: スキップ (日付処理エラー: ${e}, データ: ${shiftDateRaw})`);
+      return;
     }
+
+    let displayClinicName = originalClinicName;
+    if (TARGET_CLINICS_FOR_DEPT_SPLIT.includes(originalClinicName) &&
+        (originalDepartment === "小児科" || originalDepartment === "内科")) {
+      displayClinicName = `${originalClinicName}（${originalDepartment}）`;
+    }
+    const key = `${shiftDateKey}-${displayClinicName}-${originalDepartment}`;
+
+    if (!results[key]) {
+      results[key] = {
+        shiftDate: shiftDateObj, department: originalDepartment, clinicName: displayClinicName,
+        aShiftSum: 0, bShiftSum: 0, cShiftSum: 0,
+        doctorsA: [], doctorsB: [], doctorsC: []
+      };
+    }
+    results[key].aShiftSum += Number(aShiftValue) || 0;
+    results[key].bShiftSum += Number(bShiftValue) || 0;
+    results[key].cShiftSum += Number(cShiftValue) || 0;
+    if (Number(aShiftValue) == 1 && doctorName !== '未設定' && !results[key].doctorsA.includes(doctorName)) { results[key].doctorsA.push(doctorName); }
+    if (Number(bShiftValue) == 1 && doctorName !== '未設定' && !results[key].doctorsB.includes(doctorName)) { results[key].doctorsB.push(doctorName); }
+    if (Number(cShiftValue) == 1 && doctorName !== '未設定' && !results[key].doctorsC.includes(doctorName)) { results[key].doctorsC.push(doctorName); }
+  });
+
+  const outputHeader = ['拠点名', '勤務日', '診療科', '09:00~13:00', '15:00~18:00', '18:00~21:00', '', 'Aシフト医師 09:00-13:00', 'Bシフト医師 15:00-18:00', 'Cシフト医師 18:00-21:00'];
+  const numOutputColumns = outputHeader.length;
+  const outputRows = [];
+  for (const key in results) {
+    const record = results[key];
+    let formattedShiftDate = '日付エラー';
+    try {
+      if (record.shiftDate instanceof Date && !isNaN(record.shiftDate.getTime())) {
+        const yyyymmdd = fastFormatDate(record.shiftDate); // ★爆速化
+        const weekday = weekdays[record.shiftDate.getDay()];
+        formattedShiftDate = `${yyyymmdd}（${weekday}）`;
+      } else { Logger.log(`不正な日付オブジェクトでフォーマット試行: key=${key}, shiftDate=${record.shiftDate}`); }
+    } catch (e) { formattedShiftDate = 'フォーマットエラー'; Logger.log(`日付フォーマットエラー: ${e}, Date: ${record.shiftDate}`); }
+    const outputRowData = [
+      record.clinicName,
+      formattedShiftDate,
+      record.department,
+      record.aShiftSum,
+      record.bShiftSum,
+      record.cShiftSum,
+      '',
+      record.doctorsA.join(', '),
+      record.doctorsB.join(', '),
+      record.doctorsC.join(', ')
+    ];
+    outputRows.push(outputRowData);
   }
-  if (typeof timeInput === 'number') {
-      if (timeInput >= 0 && timeInput < 1) {
-          const totalMinutesInDay = 24 * 60;
-          return Math.round(timeInput * totalMinutesInDay);
+  const sortedData = outputRows.sort((a, b) => {
+    const clinicA = a[0], clinicB = b[0];
+    const dateStrA = a[1].split('（')[0].trim(), dateStrB = b[1].split('（')[0].trim();
+    let dateA = new Date("invalid"), dateB = new Date("invalid");
+    try { dateA = parseDateToSafeDateObj(dateStrA) || new Date("invalid"); } catch(e){}
+    try { dateB = parseDateToSafeDateObj(dateStrB) || new Date("invalid"); } catch(e){}
+    if (clinicA < clinicB) return -1; if (clinicA > clinicB) return 1;
+    if (!isNaN(dateA.getTime()) && !isNaN(dateB.getTime())) return dateA.getTime() - dateB.getTime();
+    if (!isNaN(dateA.getTime())) return -1; if (!isNaN(dateB.getTime())) return 1;
+    return a[1].localeCompare(b[1]);
+  });
+  const lastRowOutput = targetSheet.getLastRow();
+  if (lastRowOutput >= 1) {
+    targetSheet.getRange(1, 1, lastRowOutput, targetSheet.getMaxColumns()).clearContent();
+  }
+  targetSheet.getRange(1, 1, 1, numOutputColumns).setValues([outputHeader]);
+  if (sortedData.length > 0) {
+    targetSheet.getRange(2, 1, sortedData.length, numOutputColumns).setValues(sortedData);
+  }
+  SpreadsheetApp.flush();
+  try {
+    Logger.log('applyConditionalFormatting_CellSpecific() を呼び出します');
+    applyConditionalFormatting_CellSpecific();
+  } catch (e) {
+    Logger.log(`セル別書式設定(applyConditionalFormatting_CellSpecific)の呼び出し中にエラー: ${e}`);
+  }
+  try {
+    Logger.log('generateDoctorAbsenceReportWithContext() を呼び出します');
+    if (typeof generateDoctorAbsenceReportWithContext === 'function') {
+        generateDoctorAbsenceReportWithContext();
+    }
+  } catch (e) {
+    Logger.log(`医師不在拠点書き出し(generateDoctorAbsenceReportWithContext)の呼び出し中にエラー: ${e}`);
+    SpreadsheetApp.getUi().alert('エラー', `医師不在拠点シートへの書き出し中にエラーが発生しました: ${e.message}`, SpreadsheetApp.getUi().ButtonSet.OK);
+  }
+  try {
+    Logger.log('setupDateSelection() を呼び出します');
+    setupDateSelection();
+  } catch (e) {
+    Logger.log(`setupDateSelection() の呼び出し中にエラー: ${e}`);
+    SpreadsheetApp.getUi().alert('情報', `日付選択の設定処理(setupDateSelection)中にエラーが発生しました: ${e.message}`, SpreadsheetApp.getUi().ButtonSet.OK);
+  }
+  try {
+    Logger.log('updateUnfilledStatusWithClinicLogicAndReset_v3() を呼び出します');
+    if (typeof updateUnfilledStatusWithClinicLogicAndReset_v3 === 'function') {
+        updateUnfilledStatusWithClinicLogicAndReset_v3(ss);
+    }
+  } catch (e) {
+    Logger.log(`「未充足管理」シート更新処理(updateUnfilledStatusWithClinicLogicAndReset_v3)の呼び出し中にエラー: ${e}`);
+    SpreadsheetApp.getUi().alert('エラー', `「未充足管理」シートの更新処理中にエラーが発生しました: ${e.message}`, SpreadsheetApp.getUi().ButtonSet.OK);
+  }
+  try {
+    Logger.log('insertDoctorAbsenceData() を呼び出します');
+    if (typeof insertDoctorAbsenceData === 'function') {
+        insertDoctorAbsenceData(ss);
+    }
+  } catch (e) {
+    Logger.log(`医師不在データの挿入処理(insertDoctorAbsenceData)の呼び出し中にエラー: ${e}`);
+    SpreadsheetApp.getUi().alert('エラー', `医師不在データの挿入処理中にエラーが発生しました: ${e.message}`, SpreadsheetApp.getUi().ButtonSet.OK);
+  }
+  Logger.log('スクリプト updateSheetRowAdjusted_CallingCellSpecificFormatting 完了');
+}
+
+// ------------------------------------------------------------------------------------
+// 他の関数 (clearData, applyConditionalFormatting_CellSpecific, setupDateSelection)
+// ------------------------------------------------------------------------------------
+function clearData() {
+  const ui = SpreadsheetApp.getUi();
+  const result = ui.alert(
+      'データの削除と書式リセット',
+      'すべてのデータを削除しますか？',
+      ui.ButtonSet.YES_NO);
+
+  if (result == ui.Button.YES) {
+    try {
+      const ss = SpreadsheetApp.getActiveSpreadsheet();
+      const sourceSheet = ss.getSheetByName('貼付用');
+      const targetSheet = ss.getSheetByName('確認用');
+
+      let message = '';
+      if (sourceSheet) {
+        const lastRowSource = sourceSheet.getLastRow();
+        if (lastRowSource >= 3) { 
+          sourceSheet.getRange(3, 1, lastRowSource - 2, 49).clear();
+          message += '「貼付用」シートのデータと書式を削除しました。\n';
+        }
       }
-  }
-  return NaN;
-}
-
-function formatMinutesToHHMM(totalMinutes) {
-  if (isNaN(totalMinutes) || totalMinutes < 0) return "不明";
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
-}
-
-function mergeIntervals(intervals) {
-  if (!intervals || intervals.length === 0) {
-    return [];
-  }
-  intervals.sort((a, b) => a.start - b.start);
-  const merged = [];
-  if (intervals.length === 0) return merged;
-
-  let currentMerge = { ...intervals[0] };
-  for (let i = 1; i < intervals.length; i++) {
-    const nextInterval = intervals[i];
-    if (nextInterval.start <= currentMerge.end) {
-      currentMerge.end = Math.max(currentMerge.end, nextInterval.end);
-    } else {
-      merged.push(currentMerge);
-      currentMerge = { ...nextInterval };
+      if (targetSheet) {
+        const lastRowTarget = targetSheet.getLastRow();
+        if (lastRowTarget >= 2) { 
+          targetSheet.getRange(2, 1, lastRowTarget - 1, 10).clear();
+          message += '「確認用」シートのデータと書式を削除しました。';
+        }
+      }
+      ui.alert(message || '削除対象のデータがありませんでした。');
+    } catch (e) {
+      ui.alert(`データ削除中にエラーが発生しました: ${e.message}`);
     }
   }
-  merged.push(currentMerge);
-  return merged;
 }
 
-function formatAbsenceForExtractSheet(clinicName, department, startMin, endMin) {
-  let departmentSuffix = "";
-  if (GLOBAL_TARGET_CLINICS_FOR_DEPT_INFO.includes(clinicName) && (department === "小児科" || department === "内科")) {
-    departmentSuffix = department;
-  }
-  return `【${clinicName}】${formatMinutesToHHMM(startMin)}~${formatMinutesToHHMM(endMin)}${departmentSuffix}`;
-}
-
-
-// ------------------------------------------------------------------------------------
-// 「不在時間」シートへの出力処理関数 (extractDoctorAbsenceRevised)
-// ------------------------------------------------------------------------------------
-function extractDoctorAbsenceRevised() {
+function applyConditionalFormatting_CellSpecific() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sourceSheet = ss.getSheetByName("貼付用");
-  const targetSheet = ss.getSheetByName("不在時間");
+  const targetSheet = ss.getSheetByName('確認用');
+  if (!targetSheet) return;
 
-  if (!sourceSheet || !targetSheet) return;
+  const startRow = 2;
+  const lastRow = targetSheet.getLastRow();
+  if (lastRow < startRow) return;
 
-  targetSheet.clear();
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const numColumns = 10;
+  const dataRange = targetSheet.getRange(startRow, 1, lastRow - startRow + 1, numColumns);
+  const values = dataRange.getValues();
+  const backgroundColors = [];
+  const redColor = '#FFCCCC';
+  const whiteColor = '#FFFFFF';
 
-  const shiftTimesMin = GLOBAL_SHIFT_TIMES_MIN;
-  const excludedLocations = GLOBAL_EXCLUDED_LOCATIONS;
-  const excludedDepartments = GLOBAL_EXCLUDED_DEPARTMENTS;
-  const standardShiftOrder = GLOBAL_STANDARD_SHIFT_ORDER;
-
-  const sourceData = sourceSheet.getDataRange().getValues();
-  const processedWorkData = {}; 
-
-  for (let i = 2; i < sourceData.length; i++) {
-    const row = sourceData[i];
-    const clinicName = row[12] ? String(row[12]).trim() : "";
-    const department = row[13] ? String(row[13]).trim() : "";
-    if (!row[14] || !clinicName) continue;
-    if (excludedLocations.includes(clinicName) || excludedDepartments.includes(department)) continue;
-
-    const dateObj = parseDateToSafeDateObj(row[14]);
-    if (!dateObj) continue;
-    
-    const dateKey = Utilities.formatDate(dateObj, Session.getScriptTimeZone(), "yyyy/MM/dd");
-    const workStartMin = parseTimeToMinutes(row[15]);
-    const workEndMin = parseTimeToMinutes(row[19]);
-
-    if (isNaN(workStartMin) || isNaN(workEndMin) || workStartMin >= workEndMin) continue;
-
-    const aggregationKey = `${clinicName}_${department || ""}`;
-    
-    if (!processedWorkData[dateKey]) processedWorkData[dateKey] = {};
-    if (!processedWorkData[dateKey][aggregationKey]) processedWorkData[dateKey][aggregationKey] = [];
-    processedWorkData[dateKey][aggregationKey].push({ start: workStartMin, end: workEndMin });
-  }
-
-  const outputDataRows = [];
-  const sortedDates = Object.keys(processedWorkData).sort((a, b) => new Date(a) - new Date(b));
-
-  for (const dateKey of sortedDates) {
-    const currentDateObj = parseDateToSafeDateObj(dateKey);
-    if (currentDateObj < today) continue;
-
-    const dailyWorkDataByAggregationKey = processedWorkData[dateKey];
-    let absencesForDateOutput = [];
-
-    for (const aggregationKey in dailyWorkDataByAggregationKey) {
-      const [currentClinicName, currentDepartment] = aggregationKey.split('_');
-      const workIntervalsForClinic = dailyWorkDataByAggregationKey[aggregationKey];
-
-      let shiftLookupKey = "その他";
-      const specificKeyWithDept = `${currentClinicName}${currentDepartment}`;
-      if (shiftTimesMin.hasOwnProperty(specificKeyWithDept)) shiftLookupKey = specificKeyWithDept;
-      else if (shiftTimesMin.hasOwnProperty(currentClinicName)) shiftLookupKey = currentClinicName;
-      
-      const currentClinicShifts = shiftTimesMin[shiftLookupKey] || shiftTimesMin["その他"];
-
-      for (const shiftKey of standardShiftOrder) {
-        if (!currentClinicShifts[shiftKey]) continue;
-        const [shiftStartTarget, shiftEndTarget] = currentClinicShifts[shiftKey];
-        
-        const relevantIntervals = workIntervalsForClinic
-          .map(interval => ({
-            start: Math.max(interval.start, shiftStartTarget),
-            end: Math.min(interval.end, shiftEndTarget)
-          }))
-          .filter(interval => interval.start < interval.end);
-
-        const mergedIntervals = mergeIntervals(relevantIntervals);
-        
-        let currentTimePointer = shiftStartTarget;
-        for (const merged of mergedIntervals) {
-          if (currentTimePointer < merged.start) {
-            absencesForDateOutput.push(formatAbsenceForExtractSheet(currentClinicName, currentDepartment, currentTimePointer, merged.start));
+  for (let i = 0; i < values.length; i++) {
+    const rowBackgrounds = [];
+    for (let j = 0; j < numColumns; j++) {
+      let cellColor = whiteColor;
+      const cellValue = values[i][j];
+      switch (j) {
+        case 3: // D
+        case 4: // E
+        case 5: // F
+          if (cellValue === '' || cellValue == null || Number(cellValue) === 0) {
+            cellColor = redColor;
           }
-          currentTimePointer = Math.max(currentTimePointer, merged.end);
-        }
-        if (currentTimePointer < shiftEndTarget) {
-          absencesForDateOutput.push(formatAbsenceForExtractSheet(currentClinicName, currentDepartment, currentTimePointer, shiftEndTarget));
-        }
+          break;
+        case 7: // H
+        case 8: // I
+        case 9: // J
+          if (cellValue === '' || cellValue == null) {
+            cellColor = redColor;
+          }
+          break;
       }
+      rowBackgrounds.push(cellColor);
     }
-    if (absencesForDateOutput.length > 0) {
-      outputDataRows.push([dateKey, ...absencesForDateOutput]);
-    }
+    backgroundColors.push(rowBackgrounds);
   }
+  dataRange.setBackgrounds(backgroundColors);
+}
+
+function setupDateSelection() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('文章自動作成');
+  const sourceSheet = ss.getSheetByName('確認用');
+  if (!sheet || !sourceSheet) return;
+
+  const baseDate = new Date();
+  if (baseDate.getHours() >= 15) {
+    baseDate.setDate(baseDate.getDate() + 1);
+  }
+
+  const endDate = new Date(baseDate);
+  endDate.setDate(baseDate.getDate() + 6); // 起点日から6日後（計7日間の1週間分）
+
+  const weekdaysJP = ["日", "月", "火", "水", "木", "金", "土"];
+  const formattedStart = fastFormatDate(baseDate) + `（${weekdaysJP[baseDate.getDay()]}）`; // ★爆速化
+  const formattedEnd = fastFormatDate(endDate) + `（${weekdaysJP[endDate.getDay()]}）`; // ★爆速化
+
+  const lastRow = sourceSheet.getLastRow();
+  let uniqueValues = [];
+
+  if (lastRow >= 2) {
+    const bColumnValues = sourceSheet.getRange(2, 2, lastRow - 1, 1).getValues().flat();
+    uniqueValues = [...new Set(bColumnValues.filter(Boolean))].map(dateStr => {
+      const dateObj = parseDateToSafeDateObj(dateStr); // ★強化版パース
+      return !dateObj ? dateStr : fastFormatDate(dateObj) + `（${weekdaysJP[dateObj.getDay()]}）`;
+    });
+  }
+
+  if (!uniqueValues.includes(formattedStart)) uniqueValues.unshift(formattedStart);
+  if (!uniqueValues.includes(formattedEnd)) uniqueValues.push(formattedEnd);
+
+  if (uniqueValues.length === 0) return;
+
+  const rule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(uniqueValues, true)
+    .setAllowInvalid(true) 
+    .build();
+
+  // ★修正: 手動で選んだ日付を維持し、空欄の場合のみ自動セットする
+  const cellB2 = sheet.getRange('B2');
+  const cellB4 = sheet.getRange('B4');
   
-  if (outputDataRows.length > 0) {
-    let maxCols = Math.max(...outputDataRows.map(r => r.length));
-    const headerRow = ["日付", ...Array.from({length: maxCols - 1}, (_, i) => `不在時間${i + 1}`)];
-    const finalOutput = [headerRow, ...outputDataRows.map(r => r.concat(Array(maxCols - r.length).fill("")))];
-    
-    targetSheet.getRange(1, 1, finalOutput.length, maxCols).setValues(finalOutput).setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
-  } else {
-    targetSheet.getRange(1,1,1,2).setValues([["日付", "該当する不在時間はありませんでした。(今日以降)"]]);
-  }
+  let currentB2 = cellB2.getValue();
+  let currentB4 = cellB4.getValue();
+
+  if (!currentB2) cellB2.setValue(formattedStart);
+  if (!currentB4) cellB4.setValue(formattedEnd);
+  
+  cellB2.setDataValidation(rule);
+  cellB4.setDataValidation(rule);
+
+  Logger.log(`期間設定完了: ${formattedStart} 〜 ${formattedEnd}`);
 }
 
 // ------------------------------------------------------------------------------------
@@ -289,10 +385,10 @@ function generateDoctorAbsenceReportWithContext() {
     if (!row[14] || !clinicName) continue;
     if (excludedLocations.includes(clinicName) || excludedDepartments.includes(department)) continue;
 
-    const dateObj = parseDateToSafeDateObj(row[14]);
+    const dateObj = parseDateToSafeDateObj(row[14]); // ★強化版パース
     if (!dateObj) continue;
     
-    const dateKey = Utilities.formatDate(dateObj, Session.getScriptTimeZone(), "yyyy/MM/dd");
+    const dateKey = fastFormatDate(dateObj); // ★爆速化
     const workStartMin = parseTimeToMinutes(row[15]);
     const workEndMin = parseTimeToMinutes(row[19]);
 
@@ -309,8 +405,8 @@ function generateDoctorAbsenceReportWithContext() {
   const sortedDates = Object.keys(processedWorkData).sort((a, b) => new Date(a) - new Date(b));
 
   for (const dateKey of sortedDates) {
-    const currentDateObj = parseDateToSafeDateObj(dateKey);
-    if (currentDateObj < today) continue;
+    const currentDateObj = parseDateToSafeDateObj(dateKey); // ★強化版パース
+    if (!currentDateObj || currentDateObj < today) continue;
 
     const dailyWorkDataByAggregationKey = processedWorkData[dateKey];
     for (const aggregationKey in dailyWorkDataByAggregationKey) {
@@ -328,35 +424,30 @@ function generateDoctorAbsenceReportWithContext() {
         if (!currentClinicShifts[shiftKey]) continue;
         const [shiftStartTarget, shiftEndTarget] = currentClinicShifts[shiftKey];
         
-        // ★修正点1: 勤務時間をマージ
         const mergedIntervals = mergeIntervals(workIntervalsForClinic
           .map(interval => ({ start: Math.max(interval.start, shiftStartTarget), end: Math.min(interval.end, shiftEndTarget) }))
           .filter(interval => interval.start < interval.end));
         
-        // ★修正点2: 正確な隙間時間（gaps）を計算
         let currentTimePointer = shiftStartTarget;
         let gaps = [];
 
         for (const merged of mergedIntervals) {
             if (currentTimePointer < merged.start) {
-                // 勤務開始前の空白
                 gaps.push(`${formatMinutesToHHMM(currentTimePointer)}-${formatMinutesToHHMM(merged.start)}`);
             }
             currentTimePointer = Math.max(currentTimePointer, merged.end);
         }
-        // 勤務終了後の空白
         if (currentTimePointer < shiftEndTarget) {
             gaps.push(`${formatMinutesToHHMM(currentTimePointer)}-${formatMinutesToHHMM(shiftEndTarget)}`);
         }
 
-        // 隙間がある場合のみリストに追加（定型枠ではなく、正確なgapsを保存）
         if (gaps.length > 0) {
           const preciseAbsenceStr = gaps.join(", ");
           unfulfilledShiftsList.push({ 
               dateKey, 
               aggregationKey, 
               standardShiftKey: shiftKey, 
-              preciseAbsenceStr: preciseAbsenceStr // ★正確な時間をセット
+              preciseAbsenceStr: preciseAbsenceStr
           });
         }
       }
@@ -374,7 +465,6 @@ function generateDoctorAbsenceReportWithContext() {
     else if (shiftTimesMin.hasOwnProperty(clinicName)) shiftLookupKey = clinicName;
     const currentClinicShiftTimes = shiftTimesMin[shiftLookupKey] || shiftTimesMin["その他"];
     
-    // ★修正点3: 保存しておいた正確な時間を使用
     const absenceTimeStr = preciseAbsenceStr;
     
     const { prevDoctorsStr, nextDoctorsStr } = getAdjacentShiftDoctors(

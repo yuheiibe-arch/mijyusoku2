@@ -154,7 +154,6 @@ function updateSheetRowAdjusted_CallingCellSpecificFormatting() {
   }
   try {
     Logger.log('generateDoctorAbsenceReportWithContext() を呼び出します');
-    // 関数が存在するかチェック
     if (typeof generateDoctorAbsenceReportWithContext === 'function') {
         generateDoctorAbsenceReportWithContext();
     }
@@ -171,7 +170,6 @@ function updateSheetRowAdjusted_CallingCellSpecificFormatting() {
   }
   try {
     Logger.log('updateUnfilledStatusWithClinicLogicAndReset_v3() を呼び出します');
-    // 関数が存在するかチェック
     if (typeof updateUnfilledStatusWithClinicLogicAndReset_v3 === 'function') {
         updateUnfilledStatusWithClinicLogicAndReset_v3(ss);
     }
@@ -181,7 +179,6 @@ function updateSheetRowAdjusted_CallingCellSpecificFormatting() {
   }
   try {
     Logger.log('insertDoctorAbsenceData() を呼び出します');
-    // 関数が存在するかチェック
     if (typeof insertDoctorAbsenceData === 'function') {
         insertDoctorAbsenceData(ss);
     }
@@ -189,13 +186,23 @@ function updateSheetRowAdjusted_CallingCellSpecificFormatting() {
     Logger.log(`医師不在データの挿入処理(insertDoctorAbsenceData)の呼び出し中にエラー: ${e}`);
     SpreadsheetApp.getUi().alert('エラー', `医師不在データの挿入処理中にエラーが発生しました: ${e.message}`, SpreadsheetApp.getUi().ButtonSet.OK);
   }
+
+  // ★ 追加: すべての更新が終わったら、文章自動作成スクリプトを呼び出して一気通貫で処理を完了させる
+  try {
+    Logger.log('generateChatworkMessage() を呼び出します');
+    if (typeof generateChatworkMessage === 'function') {
+        generateChatworkMessage();
+    }
+  } catch (e) {
+    Logger.log(`文章自動作成エラー: ${e}`);
+  }
+
   Logger.log('スクリプト updateSheetRowAdjusted_CallingCellSpecificFormatting 完了');
 }
 
 
 // ------------------------------------------------------------------------------------
 // 他の関数 (clearData, applyConditionalFormatting_CellSpecific, setupDateSelection)
-// 修正なし
 // ------------------------------------------------------------------------------------
 function clearData() {
   const ui = SpreadsheetApp.getUi();
@@ -275,18 +282,19 @@ function applyConditionalFormatting_CellSpecific() {
   }
   dataRange.setBackgrounds(backgroundColors);
 }
+
 function setupDateSelection() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName('文章自動作成');
   const sourceSheet = ss.getSheetByName('確認用');
   if (!sheet || !sourceSheet) return;
 
-  // --- 15時以降は「明日」を起点とするロジック ---
+  // --- ★修正: 12時を境界とするロジック ---
   const baseDate = new Date();
   const currentHour = baseDate.getHours();
   
-  if (currentHour >= 15) {
-    baseDate.setDate(baseDate.getDate() + 1); // 15時以降なら1日進める（明日）
+  if (currentHour >= 12) {
+    baseDate.setDate(baseDate.getDate() + 1); // 12時以降なら「明日」を起点に
   }
 
   const endDate = new Date(baseDate);
@@ -308,18 +316,19 @@ function setupDateSelection() {
     });
   }
 
-  // ★ 修正点1: エラー(入力規則違反)を防ぐため、セットする日付がリストになければ強制的に追加する
+  // エラー(入力規則違反)を防ぐため、セットする日付がリストになければ強制的に追加する
   if (!uniqueValues.includes(formattedStart)) uniqueValues.unshift(formattedStart);
   if (!uniqueValues.includes(formattedEnd)) uniqueValues.push(formattedEnd);
 
   if (uniqueValues.length === 0) return;
 
-  // ★ 修正点2: setAllowInvalid(true) に変更し、ポップアップエラーで処理をブロックしないようにする
+  // setAllowInvalid(true) に変更し、ポップアップエラーで処理をブロックしないようにする
   const rule = SpreadsheetApp.newDataValidation()
     .requireValueInList(uniqueValues, true)
     .setAllowInvalid(true) 
     .build();
 
+  // ★ 修正: カスタムメニューからの実行時は「強制的に」最新の日付へ書き換える
   sheet.getRange('B2').setDataValidation(null).setValue(formattedStart).setDataValidation(rule);
   sheet.getRange('B4').setDataValidation(null).setValue(formattedEnd).setDataValidation(rule);
   
