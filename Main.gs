@@ -49,7 +49,7 @@ function generateChatworkMessage() {
     Logger.log('追加データソースの読み込みに失敗しました: ' + e.message);
   }
 
-  // --- ★追加: COO室依頼２診要望データの読み込み ---
+  // --- COO室依頼２診要望データの読み込み ---
   const COO_SS_ID = '1Ky5fXKvEWFodUwcu-HnHKiOBn6zdb090j79OjI6KNtk';
   const cooDataByDate = {};
   try {
@@ -107,10 +107,15 @@ function generateChatworkMessage() {
   }
   if (!uniqueValues.includes(formattedStart)) uniqueValues.unshift(formattedStart);
   if (!uniqueValues.includes(formattedEnd)) uniqueValues.push(formattedEnd);
+  
   const rule = SpreadsheetApp.newDataValidation().requireValueInList(uniqueValues, true).setAllowInvalid(true).build();
   
   const cellB2 = targetSheet.getRange('B2');
   const cellB4 = targetSheet.getRange('B4');
+  
+  // ★★★ 修正ポイント: 値をセットする前に、古い入力規則を完全に消去する ★★★
+  cellB2.setDataValidation(null);
+  cellB4.setDataValidation(null);
   
   let startDateRaw = cellB2.getValue();
   let endDateRaw = cellB4.getValue();
@@ -124,6 +129,7 @@ function generateChatworkMessage() {
     endDateRaw = formattedEnd;
   }
   
+  // 値を安全にセットした後で、新しい入力規則を再適用する
   cellB2.setDataValidation(rule);
   cellB4.setDataValidation(rule);
 

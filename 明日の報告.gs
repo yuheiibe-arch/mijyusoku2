@@ -262,10 +262,26 @@ function parseDateToSafeDateObj(dateInput) {
   return null;
 }
 
-function parseTimeToMinutes(timeStr) {
-  if (!timeStr) return NaN;
-  const parts = timeStr.trim().split(':');
-  return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+function parseTimeToMinutes(timeInput) {
+  if (!timeInput) return NaN;
+
+  // ① Date型（1899年〜）で読み込まれた場合の安全処理
+  if (timeInput instanceof Date) {
+    return timeInput.getHours() * 60 + timeInput.getMinutes();
+  }
+  // ② 文字列の場合のみ trim() を実行する安全処理
+  if (typeof timeInput === 'string') {
+    const parts = timeInput.trim().split(':');
+    if (parts.length >= 2) {
+      return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+    }
+  }
+  // ③ シリアル値（小数）で読み込まれた場合の安全処理
+  if (typeof timeInput === 'number' && timeInput >= 0 && timeInput < 1) {
+    return Math.round(timeInput * 24 * 60);
+  }
+
+  return NaN;
 }
 
 function formatMinutesToHHMM(totalMinutes) {

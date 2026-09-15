@@ -334,3 +334,30 @@ function setupDateSelection() {
   
   Logger.log(`期間設定完了: ${formattedStart} 〜 ${formattedEnd}`);
 }
+// ------------------------------------------------------------------------------------
+// 勤務時間の重複（被り）を結合するための必須ヘルパー関数
+// ------------------------------------------------------------------------------------
+function mergeIntervals(intervals) {
+  if (!intervals || intervals.length === 0) {
+    return [];
+  }
+  
+  // 開始時間順に並び替え
+  intervals.sort((a, b) => a.start - b.start);
+
+  const merged = [];
+  let currentMerge = { ...intervals[0] };
+
+  for (let i = 1; i < intervals.length; i++) {
+    const nextInterval = intervals[i];
+    // 時間が重なっている場合は結合する
+    if (nextInterval.start <= currentMerge.end) {
+      currentMerge.end = Math.max(currentMerge.end, nextInterval.end);
+    } else {
+      merged.push(currentMerge);
+      currentMerge = { ...nextInterval };
+    }
+  }
+  merged.push(currentMerge);
+  return merged;
+}
