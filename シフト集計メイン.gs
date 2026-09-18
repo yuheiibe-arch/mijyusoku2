@@ -26,6 +26,7 @@ function updateSheetRowAdjusted_CallingCellSpecificFormatting() {
   const sourceSheet = ss.getSheetByName('貼付用');
   const targetSheet = ss.getSheetByName('確認用');
   
+  // 空行の大量ログ出力を防ぎ、処理を高速化
   const DETAILED_LOGGING = false; 
 
   if (!sourceSheet || !targetSheet) {
@@ -143,7 +144,7 @@ function updateSheetRowAdjusted_CallingCellSpecificFormatting() {
   }
   SpreadsheetApp.flush();
   
-  // ▼ 別ファイルの関数を呼び出し ▼
+  // ▼ 別のファイルに分けた機能を呼び出す ▼
   try { applyConditionalFormatting_CellSpecific(); } catch (e) {}
   try {
     if (typeof generateDoctorAbsenceReportWithContext === 'function') {
@@ -153,7 +154,6 @@ function updateSheetRowAdjusted_CallingCellSpecificFormatting() {
     ss.toast(`医師不在拠点書き出しエラー: ${e.message}`, 'エラー', 5);
   }
   try { setupDateSelection(); } catch (e) {}
-  
   try {
     if (typeof generateChatworkMessage === 'function') {
         generateChatworkMessage();

@@ -150,7 +150,7 @@ function generateDoctorAbsenceReportWithContext() {
 }
 
 // ------------------------------------------------------------------------------------
-// 安全対策用の必須ヘルパー関数（欠損防止）
+// 安全対策用の必須ヘルパー関数
 // ------------------------------------------------------------------------------------
 function mergeIntervals(intervals) {
   if (!intervals || intervals.length === 0) return [];

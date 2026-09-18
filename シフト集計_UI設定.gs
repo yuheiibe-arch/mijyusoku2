@@ -84,7 +84,7 @@ function setupDateSelection() {
     uniqueValues = [...new Set(bColumnValues.filter(Boolean))]
       .map(dateStr => {
         const dateObj = parseDateToSafeDateObj(dateStr); 
-        if (dateObj && dateObj < todayStart) return null; // 過去日付除外
+        if (dateObj && dateObj < todayStart) return null;
         return !dateObj ? dateStr : fastFormatDate(dateObj) + `（${weekdaysJP[dateObj.getDay()]}）`;
       }).filter(Boolean);
   }
@@ -102,8 +102,11 @@ function setupDateSelection() {
   cellB2.setNumberFormat('@').setDataValidation(null);
   cellB4.setNumberFormat('@').setDataValidation(null);
   
-  if (!cellB2.getValue()) cellB2.setValue(formattedStart);
-  if (!cellB4.getValue()) cellB4.setValue(formattedEnd);
+  let currentB2 = cellB2.getValue();
+  let currentB4 = cellB4.getValue();
+
+  if (!currentB2) cellB2.setValue(formattedStart);
+  if (!currentB4) cellB4.setValue(formattedEnd);
   
   cellB2.setDataValidation(rule);
   cellB4.setDataValidation(rule);
