@@ -1,10 +1,31 @@
+// ------------------------------------------------------------------------------------
+// グローバル定数（必須設定）
+// ------------------------------------------------------------------------------------
+const GLOBAL_STANDARD_SHIFT_ORDER = ["A", "B", "C"];
+const GLOBAL_SHIFT_TIMES_MIN = {
+  "北葛西小児科": { A: [9 * 60, 13 * 60], B: [15 * 60, 18 * 60], C: [18 * 60, 20 * 60] },
+  "北葛西内科": { A: [9 * 60, 13 * 60], B: [15 * 60, 18 * 60], C: [18 * 60, 20 * 60] },
+  "亀有小児科": { A: [9 * 60, 13 * 60], B: [15 * 60, 18 * 60], C: [18 * 60, 21 * 60] },
+  "亀有内科": { A: [9 * 60, 13 * 60], B: [15 * 60, 18 * 60], C: [18 * 60, 21 * 60] },
+  "その他": { A: [9 * 60, 13 * 60], B: [15 * 60, 18 * 60], C: [18 * 60, 21 * 60] }
+};
+const GLOBAL_EXCLUDED_LOCATIONS = [
+  "有給", "欠勤", "院外勤務（小児科）", "院外勤務（内科）",
+  "【関東】バックアップシフト", "医師会・嘱託医業務（小児科）", "医師会・嘱託医業務（内科）", "医師会", "医師会業務", "嘱託医業務"
+];
+const GLOBAL_EXCLUDED_DEPARTMENTS = [
+  "小児科ワクチン専任(対象：小児～成人)", "内科ワクチン専任(対象：小児～成人)"
+];
+const GLOBAL_TARGET_CLINICS_FOR_DEPT_INFO = ["北葛西", "亀有"];
+
+// ------------------------------------------------------------------------------------
 // メインの更新関数
+// ------------------------------------------------------------------------------------
 function updateSheetRowAdjusted_CallingCellSpecificFormatting() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sourceSheet = ss.getSheetByName('貼付用');
   const targetSheet = ss.getSheetByName('確認用');
   
-  // ★ 詳細ログを false にして空行の大量ログをストップし、処理を高速化
   const DETAILED_LOGGING = false; 
 
   if (!sourceSheet || !targetSheet) {
@@ -14,9 +35,7 @@ function updateSheetRowAdjusted_CallingCellSpecificFormatting() {
 
   ss.toast('シフト集計処理を開始します...', '処理開始', 3);
 
-  const localExcludedLocations = (typeof GLOBAL_EXCLUDED_LOCATIONS !== 'undefined') 
-    ? GLOBAL_EXCLUDED_LOCATIONS.filter(item => item !== "【関東】バックアップシフト")
-    : [];
+  const localExcludedLocations = GLOBAL_EXCLUDED_LOCATIONS.filter(item => item !== "【関東】バックアップシフト");
 
   const data = sourceSheet.getDataRange().getValues();
   const rows = data.slice(2);
@@ -26,20 +45,14 @@ function updateSheetRowAdjusted_CallingCellSpecificFormatting() {
     return;
   }
 
-  const EXCLUDED_DEPARTMENTS = [
-    "小児科ワクチン専任(対象：小児～成人)", "内科ワクチン専任(対象：小児～成人)"
-  ];
-  const TARGET_CLINICS_FOR_DEPT_SPLIT = ["北葛西", "亀有"];
   const results = {};
   const weekdays = ["日", "月", "火", "水", "木", "金", "土"];
 
   rows.forEach((row, index) => {
     const rowIndex = index + 3;
     
-    // 日付も拠点名も空っぽの「完全な空行」は静かにスキップ
-    if (!row[0] && !row[12] && !row[14]) {
-      return;
-    }
+    // 空行スキップ
+    if (!row[0] && !row[12] && !row[14]) return;
 
     const doctorName = row[0] ? row[0].toString().trim() : '未設定';
     const originalClinicName = row[12] ? row[12].toString().trim() : null;
@@ -51,15 +64,11 @@ function updateSheetRowAdjusted_CallingCellSpecificFormatting() {
     const cShiftValue = row[65]; // BN列
 
     if ((originalClinicName && localExcludedLocations.includes(originalClinicName)) ||
-        (originalDepartment && EXCLUDED_DEPARTMENTS.includes(originalDepartment))) {
-      if (DETAILED_LOGGING) Logger.log(`行 ${rowIndex}: スキップ (理由: 除外項目該当)`);
+        (originalDepartment && GLOBAL_EXCLUDED_DEPARTMENTS.includes(originalDepartment))) {
       return;
     }
     
-    if (!originalClinicName || !shiftDateRaw || !originalDepartment) {
-      if (DETAILED_LOGGING) Logger.log(`行 ${rowIndex}: スキップ (必須項目不足)`);
-      return;
-    }
+    if (!originalClinicName || !shiftDateRaw || !originalDepartment) return;
     
     let shiftDateObj, shiftDateKey;
     try {
@@ -71,7 +80,7 @@ function updateSheetRowAdjusted_CallingCellSpecificFormatting() {
     }
 
     let displayClinicName = originalClinicName;
-    if (TARGET_CLINICS_FOR_DEPT_SPLIT.includes(originalClinicName) &&
+    if (GLOBAL_TARGET_CLINICS_FOR_DEPT_INFO.includes(originalClinicName) &&
         (originalDepartment === "小児科" || originalDepartment === "内科")) {
       displayClinicName = `${originalClinicName}（${originalDepartment}）`;
     }
@@ -93,7 +102,6 @@ function updateSheetRowAdjusted_CallingCellSpecificFormatting() {
   });
 
   const outputHeader = ['拠点名', '勤務日', '診療科', '09:00~13:00', '15:00~18:00', '18:00~21:00', '', 'Aシフト医師 09:00-13:00', 'Bシフト医師 15:00-18:00', 'Cシフト医師 18:00-21:00'];
-  const numOutputColumns = outputHeader.length;
   const outputRows = [];
   
   for (const key in results) {
@@ -107,27 +115,18 @@ function updateSheetRowAdjusted_CallingCellSpecificFormatting() {
       }
     } catch (e) { formattedShiftDate = 'フォーマットエラー'; }
     
-    const outputRowData = [
-      record.clinicName,
-      formattedShiftDate,
-      record.department,
-      record.aShiftSum,
-      record.bShiftSum,
-      record.cShiftSum,
-      '',
-      record.doctorsA.join(', '),
-      record.doctorsB.join(', '),
-      record.doctorsC.join(', ')
-    ];
-    outputRows.push(outputRowData);
+    outputRows.push([
+      record.clinicName, formattedShiftDate, record.department,
+      record.aShiftSum, record.bShiftSum, record.cShiftSum, '',
+      record.doctorsA.join(', '), record.doctorsB.join(', '), record.doctorsC.join(', ')
+    ]);
   }
   
   const sortedData = outputRows.sort((a, b) => {
     const clinicA = a[0], clinicB = b[0];
-    const dateStrA = a[1].split('（')[0].trim(), dateStrB = b[1].split('（')[0].trim();
     let dateA = new Date("invalid"), dateB = new Date("invalid");
-    try { dateA = parseDateToSafeDateObj(dateStrA) || new Date("invalid"); } catch(e){}
-    try { dateB = parseDateToSafeDateObj(dateStrB) || new Date("invalid"); } catch(e){}
+    try { dateA = parseDateToSafeDateObj(a[1].split('（')[0].trim()) || new Date("invalid"); } catch(e){}
+    try { dateB = parseDateToSafeDateObj(b[1].split('（')[0].trim()) || new Date("invalid"); } catch(e){}
     if (clinicA < clinicB) return -1; if (clinicA > clinicB) return 1;
     if (!isNaN(dateA.getTime()) && !isNaN(dateB.getTime())) return dateA.getTime() - dateB.getTime();
     if (!isNaN(dateA.getTime())) return -1; if (!isNaN(dateB.getTime())) return 1;
@@ -138,22 +137,28 @@ function updateSheetRowAdjusted_CallingCellSpecificFormatting() {
   if (lastRowOutput >= 1) {
     targetSheet.getRange(1, 1, lastRowOutput, targetSheet.getMaxColumns()).clearContent();
   }
-  targetSheet.getRange(1, 1, 1, numOutputColumns).setValues([outputHeader]);
+  targetSheet.getRange(1, 1, 1, outputHeader.length).setValues([outputHeader]);
   if (sortedData.length > 0) {
-    targetSheet.getRange(2, 1, sortedData.length, numOutputColumns).setValues(sortedData);
+    targetSheet.getRange(2, 1, sortedData.length, outputHeader.length).setValues(sortedData);
   }
   SpreadsheetApp.flush();
   
-  // 別のファイルに分けた関数をここで呼び出し
+  // ▼ 別ファイルの関数を呼び出し ▼
   try { applyConditionalFormatting_CellSpecific(); } catch (e) {}
   try {
     if (typeof generateDoctorAbsenceReportWithContext === 'function') {
         generateDoctorAbsenceReportWithContext();
     }
   } catch (e) {
-    ss.toast(`医師不在拠点シートへの書き出し中にエラーが発生しました: ${e.message}`, 'エラー', 5);
+    ss.toast(`医師不在拠点書き出しエラー: ${e.message}`, 'エラー', 5);
   }
   try { setupDateSelection(); } catch (e) {}
+  
+  try {
+    if (typeof generateChatworkMessage === 'function') {
+        generateChatworkMessage();
+    }
+  } catch (e) {}
   
   ss.toast('本番シフト集計が完了しました。', '完了', 3);
 }

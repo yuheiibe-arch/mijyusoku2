@@ -1,5 +1,5 @@
 // ------------------------------------------------------------------------------------
-// データ削除処理
+// UI操作・書式設定 関数群
 // ------------------------------------------------------------------------------------
 function clearData() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -10,15 +10,11 @@ function clearData() {
 
     if (sourceSheet) {
       const lastRowSource = sourceSheet.getLastRow();
-      if (lastRowSource >= 3) { 
-        sourceSheet.getRange(3, 1, lastRowSource - 2, 49).clear();
-      }
+      if (lastRowSource >= 3) sourceSheet.getRange(3, 1, lastRowSource - 2, 49).clear();
     }
     if (targetSheet) {
       const lastRowTarget = targetSheet.getLastRow();
-      if (lastRowTarget >= 2) { 
-        targetSheet.getRange(2, 1, lastRowTarget - 1, 10).clear();
-      }
+      if (lastRowTarget >= 2) targetSheet.getRange(2, 1, lastRowTarget - 1, 10).clear();
     }
     ss.toast('削除とリセットが完了しました。', '完了', 3);
   } catch (e) {
@@ -26,9 +22,6 @@ function clearData() {
   }
 }
 
-// ------------------------------------------------------------------------------------
-// 条件付き書式（セルの色付け）処理
-// ------------------------------------------------------------------------------------
 function applyConditionalFormatting_CellSpecific() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const targetSheet = ss.getSheetByName('確認用');
@@ -51,19 +44,11 @@ function applyConditionalFormatting_CellSpecific() {
       let cellColor = whiteColor;
       const cellValue = values[i][j];
       switch (j) {
-        case 3: // D
-        case 4: // E
-        case 5: // F
-          if (cellValue === '' || cellValue == null || Number(cellValue) === 0) {
-            cellColor = redColor;
-          }
+        case 3: case 4: case 5:
+          if (cellValue === '' || cellValue == null || Number(cellValue) === 0) cellColor = redColor;
           break;
-        case 7: // H
-        case 8: // I
-        case 9: // J
-          if (cellValue === '' || cellValue == null) {
-            cellColor = redColor;
-          }
+        case 7: case 8: case 9:
+          if (cellValue === '' || cellValue == null) cellColor = redColor;
           break;
       }
       rowBackgrounds.push(cellColor);
@@ -73,9 +58,6 @@ function applyConditionalFormatting_CellSpecific() {
   dataRange.setBackgrounds(backgroundColors);
 }
 
-// ------------------------------------------------------------------------------------
-// 日付プルダウンリストの設定処理
-// ------------------------------------------------------------------------------------
 function setupDateSelection() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName('文章自動作成');
@@ -83,10 +65,7 @@ function setupDateSelection() {
   if (!sheet || !sourceSheet) return;
 
   const baseDate = new Date();
-  if (baseDate.getHours() >= 15) {
-    baseDate.setDate(baseDate.getDate() + 1);
-  }
-
+  if (baseDate.getHours() >= 15) baseDate.setDate(baseDate.getDate() + 1);
   const endDate = new Date(baseDate);
   endDate.setDate(baseDate.getDate() + 6); 
 
@@ -107,8 +86,7 @@ function setupDateSelection() {
         const dateObj = parseDateToSafeDateObj(dateStr); 
         if (dateObj && dateObj < todayStart) return null; // 過去日付除外
         return !dateObj ? dateStr : fastFormatDate(dateObj) + `（${weekdaysJP[dateObj.getDay()]}）`;
-      })
-      .filter(Boolean);
+      }).filter(Boolean);
   }
 
   if (!uniqueValues.includes(formattedStart)) uniqueValues.unshift(formattedStart);
@@ -116,10 +94,7 @@ function setupDateSelection() {
 
   if (uniqueValues.length === 0) return;
 
-  const rule = SpreadsheetApp.newDataValidation()
-    .requireValueInList(uniqueValues, true)
-    .setAllowInvalid(true) 
-    .build();
+  const rule = SpreadsheetApp.newDataValidation().requireValueInList(uniqueValues, true).setAllowInvalid(true).build();
 
   const cellB2 = sheet.getRange('B2');
   const cellB4 = sheet.getRange('B4');
@@ -127,11 +102,8 @@ function setupDateSelection() {
   cellB2.setNumberFormat('@').setDataValidation(null);
   cellB4.setNumberFormat('@').setDataValidation(null);
   
-  let currentB2 = cellB2.getValue();
-  let currentB4 = cellB4.getValue();
-
-  if (!currentB2) cellB2.setValue(formattedStart);
-  if (!currentB4) cellB4.setValue(formattedEnd);
+  if (!cellB2.getValue()) cellB2.setValue(formattedStart);
+  if (!cellB4.getValue()) cellB4.setValue(formattedEnd);
   
   cellB2.setDataValidation(rule);
   cellB4.setDataValidation(rule);

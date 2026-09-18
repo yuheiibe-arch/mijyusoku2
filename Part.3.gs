@@ -1,5 +1,5 @@
 // ------------------------------------------------------------------------------------
-// 不在枠の前後の医師を取得するヘルパー関数
+// 「医師不在拠点」シートへの出力処理関数群
 // ------------------------------------------------------------------------------------
 function getAdjacentShiftDoctors(currentClinicWorkData, currentShiftKey, clinicShiftTimesForLookup, shiftOrder) {
   let prevDoctorsStr = "";
@@ -30,28 +30,22 @@ function getAdjacentShiftDoctors(currentClinicWorkData, currentShiftKey, clinicS
   return { prevDoctorsStr, nextDoctorsStr };
 }
 
-// ------------------------------------------------------------------------------------
-// 「医師不在拠点」シートへの出力メイン関数
-// ------------------------------------------------------------------------------------
 function generateDoctorAbsenceReportWithContext() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sourceSheet = ss.getSheetByName("貼付用");
   const targetSheet = ss.getSheetByName("医師不在拠点");
 
-  if (!sourceSheet || !targetSheet) {
-    ss.toast("エラー: 「貼付用」または「医師不在拠点」シートが見つかりません。", 'エラー', 5);
-    return;
+  if (!sourceSheet || !targetSheet) return;
+
+  const header = [["日付", "拠点名", "不在時間", "前の時間枠の医師", "後ろの時間枠の医師"]];
+  targetSheet.getRange(1, 1, 1, header[0].length).setValues(header);
+  const lastTargetRow = targetSheet.getLastRow();
+  if (lastTargetRow > 1) {
+    targetSheet.getRange(2, 1, lastTargetRow - 1, targetSheet.getMaxColumns()).clearContent();
   }
 
-  targetSheet.clear();
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-
-  const shiftTimesMin = GLOBAL_SHIFT_TIMES_MIN;
-  const excludedLocations = GLOBAL_EXCLUDED_LOCATIONS;
-  const excludedDepartments = GLOBAL_EXCLUDED_DEPARTMENTS;
-  const targetClinicsForDeptInfo = GLOBAL_TARGET_CLINICS_FOR_DEPT_INFO;
-  const standardShiftOrder = GLOBAL_STANDARD_SHIFT_ORDER;
 
   const sourceData = sourceSheet.getDataRange().getValues();
   const processedWorkData = {};
@@ -62,7 +56,7 @@ function generateDoctorAbsenceReportWithContext() {
     const clinicName = row[12] ? String(row[12]).trim() : "";
     const department = row[13] ? String(row[13]).trim() : "";
     if (!row[14] || !clinicName) continue;
-    if (excludedLocations.includes(clinicName) || excludedDepartments.includes(department)) continue;
+    if (GLOBAL_EXCLUDED_LOCATIONS.includes(clinicName) || GLOBAL_EXCLUDED_DEPARTMENTS.includes(department)) continue;
 
     const dateObj = parseDateToSafeDateObj(row[14]); 
     if (!dateObj) continue;
@@ -94,12 +88,12 @@ function generateDoctorAbsenceReportWithContext() {
 
       let shiftLookupKey = "その他";
       const specificKeyWithDept = `${currentClinicName}${currentDepartment}`;
-      if (shiftTimesMin.hasOwnProperty(specificKeyWithDept)) shiftLookupKey = specificKeyWithDept;
-      else if (shiftTimesMin.hasOwnProperty(currentClinicName)) shiftLookupKey = currentClinicName;
+      if (GLOBAL_SHIFT_TIMES_MIN.hasOwnProperty(specificKeyWithDept)) shiftLookupKey = specificKeyWithDept;
+      else if (GLOBAL_SHIFT_TIMES_MIN.hasOwnProperty(currentClinicName)) shiftLookupKey = currentClinicName;
       
-      const currentClinicShifts = shiftTimesMin[shiftLookupKey] || shiftTimesMin["その他"];
+      const currentClinicShifts = GLOBAL_SHIFT_TIMES_MIN[shiftLookupKey] || GLOBAL_SHIFT_TIMES_MIN["その他"];
 
-      for (const shiftKey of standardShiftOrder) {
+      for (const shiftKey of GLOBAL_STANDARD_SHIFT_ORDER) {
         if (!currentClinicShifts[shiftKey]) continue;
         const [shiftStartTarget, shiftEndTarget] = currentClinicShifts[shiftKey];
         
@@ -121,12 +115,8 @@ function generateDoctorAbsenceReportWithContext() {
         }
 
         if (gaps.length > 0) {
-          const preciseAbsenceStr = gaps.join(", ");
           unfulfilledShiftsList.push({ 
-              dateKey, 
-              aggregationKey, 
-              standardShiftKey: shiftKey, 
-              preciseAbsenceStr: preciseAbsenceStr
+              dateKey, aggregationKey, standardShiftKey: shiftKey, preciseAbsenceStr: gaps.join(", ")
           });
         }
       }
@@ -136,35 +126,63 @@ function generateDoctorAbsenceReportWithContext() {
   const outputDataRows = [];
   for (const {dateKey, aggregationKey, standardShiftKey, preciseAbsenceStr} of unfulfilledShiftsList) {
     const [clinicName, department] = aggregationKey.split('_');
-    let outputClinicName = targetClinicsForDeptInfo.includes(clinicName) && department ? `${clinicName} (${department})` : clinicName;
+    let outputClinicName = GLOBAL_TARGET_CLINICS_FOR_DEPT_INFO.includes(clinicName) && department ? `${clinicName} (${department})` : clinicName;
     
     let shiftLookupKey = "その他";
-    const specificKeyWithDept = `${clinicName}${department}`;
-    if (shiftTimesMin.hasOwnProperty(specificKeyWithDept)) shiftLookupKey = specificKeyWithDept;
-    else if (shiftTimesMin.hasOwnProperty(clinicName)) shiftLookupKey = clinicName;
-    const currentClinicShiftTimes = shiftTimesMin[shiftLookupKey] || shiftTimesMin["その他"];
-    
-    const absenceTimeStr = preciseAbsenceStr;
+    if (GLOBAL_SHIFT_TIMES_MIN.hasOwnProperty(`${clinicName}${department}`)) shiftLookupKey = `${clinicName}${department}`;
+    else if (GLOBAL_SHIFT_TIMES_MIN.hasOwnProperty(clinicName)) shiftLookupKey = clinicName;
     
     const { prevDoctorsStr, nextDoctorsStr } = getAdjacentShiftDoctors(
-      processedWorkData[dateKey]?.[aggregationKey] || [],
-      standardShiftKey,
-      currentClinicShiftTimes,
-      standardShiftOrder
+      processedWorkData[dateKey]?.[aggregationKey] || [], standardShiftKey,
+      GLOBAL_SHIFT_TIMES_MIN[shiftLookupKey] || GLOBAL_SHIFT_TIMES_MIN["その他"], GLOBAL_STANDARD_SHIFT_ORDER
     );
 
-    outputDataRows.push([dateKey, outputClinicName, absenceTimeStr, prevDoctorsStr, nextDoctorsStr]);
+    outputDataRows.push([dateKey, outputClinicName, preciseAbsenceStr, prevDoctorsStr, nextDoctorsStr]);
   }
   
-  const header = [["日付", "拠点名", "不在時間", "前の時間枠の医師", "後ろの時間枠の医師"]];
-  targetSheet.getRange(1, 1, 1, header[0].length).setValues(header);
-
   if (outputDataRows.length > 0) {
     outputDataRows.sort((a, b) => new Date(a[0]) - new Date(b[0]) || a[1].localeCompare(b[1]));
     targetSheet.getRange(2, 1, outputDataRows.length, outputDataRows[0].length).setValues(outputDataRows).setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
   } else {
     targetSheet.getRange(2,1).setValue("該当する不在情報はありませんでした。(今日以降)");
   }
-  
   ss.toast("「医師不在拠点」シートの更新が完了しました。", "完了", 3);
+}
+
+// ------------------------------------------------------------------------------------
+// 安全対策用の必須ヘルパー関数（欠損防止）
+// ------------------------------------------------------------------------------------
+function mergeIntervals(intervals) {
+  if (!intervals || intervals.length === 0) return [];
+  intervals.sort((a, b) => a.start - b.start);
+  const merged = [];
+  let currentMerge = { ...intervals[0] };
+  for (let i = 1; i < intervals.length; i++) {
+    const nextInterval = intervals[i];
+    if (nextInterval.start <= currentMerge.end) {
+      currentMerge.end = Math.max(currentMerge.end, nextInterval.end);
+    } else {
+      merged.push(currentMerge);
+      currentMerge = { ...nextInterval };
+    }
+  }
+  merged.push(currentMerge);
+  return merged;
+}
+
+function parseTimeToMinutes(timeInput) {
+  if (!timeInput) return NaN;
+  if (timeInput instanceof Date) return timeInput.getHours() * 60 + timeInput.getMinutes();
+  if (typeof timeInput === 'string') {
+    const parts = timeInput.trim().split(':');
+    if (parts.length >= 2) return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+  }
+  if (typeof timeInput === 'number' && timeInput >= 0 && timeInput < 1) return Math.round(timeInput * 24 * 60);
+  return NaN;
+}
+
+function formatMinutesToHHMM(totalMinutes) {
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
