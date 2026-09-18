@@ -1,18 +1,18 @@
 // メインの更新関数
 function updateSheetRowAdjusted_CallingCellSpecificFormatting() {
-  const ss = SpreadsheetApp.openById('1cbeXWojsxNMhQUo1c6VflF5hLUJUyfuOXCFbGP5jJEA');
+  const ss = SpreadsheetApp.getActiveSpreadsheet(); // getActiveSpreadsheetに変更
   const sourceSheet = ss.getSheetByName('貼付用');
   const targetSheet = ss.getSheetByName('確認用');
   const DETAILED_LOGGING = true;
 
   if (!sourceSheet || !targetSheet) {
-    SpreadsheetApp.getUi().alert('貼付用 または 確認用 シートが見つかりません。');
+    ss.toast('貼付用 または 確認用 シートが見つかりません。', 'エラー', 5);
     return;
   }
 
+  ss.toast('シフト集計処理を開始します...', '処理開始', 3);
+
   // ▼▼▼ 修正点① ▼▼▼
-  // この関数内でのみ使用する、特別ルールを適用した除外リストを作成します。
-  // グローバルの除外リストから「【関東】バックアップシフト」だけを取り除きます。
   const localExcludedLocations = (typeof GLOBAL_EXCLUDED_LOCATIONS !== 'undefined') 
     ? GLOBAL_EXCLUDED_LOCATIONS.filter(item => item !== "【関東】バックアップシフト")
     : [];
@@ -22,7 +22,7 @@ function updateSheetRowAdjusted_CallingCellSpecificFormatting() {
   const rows = data.slice(2);
 
   if (rows.length === 0) {
-    SpreadsheetApp.getUi().alert('貼付用シートの3行目以降にデータが見つかりません。');
+    ss.toast('貼付用シートの3行目以降にデータが見つかりません。', 'エラー', 5);
     return;
   }
 
@@ -47,10 +47,8 @@ function updateSheetRowAdjusted_CallingCellSpecificFormatting() {
     // ▲▲▲ 修正ここまで ▲▲▲
 
     // ▼▼▼ 修正点② ▼▼▼
-    // 除外判定を、グローバルリストの代わりに先ほど作成した「localExcludedLocations」で行います。
     if ((originalClinicName && localExcludedLocations.includes(originalClinicName)) ||
         (originalDepartment && EXCLUDED_DEPARTMENTS.includes(originalDepartment))) {
-    // ▲▲▲ 修正ここまで ▲▲▲
       if (DETAILED_LOGGING) Logger.log(`行 ${rowIndex}: スキップ (理由: 除外項目該当) Clinic=${originalClinicName}, Dept=${originalDepartment}`);
       return;
     }
@@ -132,6 +130,7 @@ function updateSheetRowAdjusted_CallingCellSpecificFormatting() {
     if (!isNaN(dateA.getTime())) return -1; if (!isNaN(dateB.getTime())) return 1;
     return a[1].localeCompare(b[1]);
   });
+  
   const lastRowOutput = targetSheet.getLastRow();
   if (lastRowOutput >= 1) {
     targetSheet.getRange(1, 1, lastRowOutput, targetSheet.getMaxColumns()).clearContent();
@@ -141,84 +140,59 @@ function updateSheetRowAdjusted_CallingCellSpecificFormatting() {
     targetSheet.getRange(2, 1, sortedData.length, numOutputColumns).setValues(sortedData);
   }
   SpreadsheetApp.flush();
+  
+  // --- 後続処理（不要な処理は削除済み） ---
   try {
-    Logger.log('applyConditionalFormatting_CellSpecific() を呼び出します');
     applyConditionalFormatting_CellSpecific();
   } catch (e) {
-    Logger.log(`セル別書式設定(applyConditionalFormatting_CellSpecific)の呼び出し中にエラー: ${e}`);
+    Logger.log(`セル別書式設定エラー: ${e}`);
   }
   try {
-    Logger.log('generateDoctorAbsenceReportWithContext() を呼び出します');
     if (typeof generateDoctorAbsenceReportWithContext === 'function') {
         generateDoctorAbsenceReportWithContext();
     }
   } catch (e) {
-    Logger.log(`医師不在拠点書き出し(generateDoctorAbsenceReportWithContext)の呼び出し中にエラー: ${e}`);
-    SpreadsheetApp.getUi().alert('エラー', `医師不在拠点シートへの書き出し中にエラーが発生しました: ${e.message}`, SpreadsheetApp.getUi().ButtonSet.OK);
+    ss.toast(`医師不在拠点シートへの書き出し中にエラーが発生しました: ${e.message}`, 'エラー', 5);
   }
   try {
-    Logger.log('setupDateSelection() を呼び出します');
     setupDateSelection();
   } catch (e) {
-    Logger.log(`setupDateSelection() の呼び出し中にエラー: ${e}`);
-    SpreadsheetApp.getUi().alert('情報', `日付選択の設定処理(setupDateSelection)中にエラーが発生しました: ${e.message}`, SpreadsheetApp.getUi().ButtonSet.OK);
+    ss.toast(`日付選択の設定処理中にエラーが発生しました: ${e.message}`, 'エラー', 5);
   }
-  try {
-    Logger.log('updateUnfilledStatusWithClinicLogicAndReset_v3() を呼び出します');
-    if (typeof updateUnfilledStatusWithClinicLogicAndReset_v3 === 'function') {
-        updateUnfilledStatusWithClinicLogicAndReset_v3(ss);
-    }
-  } catch (e) {
-    Logger.log(`「未充足管理」シート更新処理(updateUnfilledStatusWithClinicLogicAndReset_v3)の呼び出し中にエラー: ${e}`);
-    SpreadsheetApp.getUi().alert('エラー', `「未充足管理」シートの更新処理中にエラーが発生しました: ${e.message}`, SpreadsheetApp.getUi().ButtonSet.OK);
-  }
-  try {
-    Logger.log('insertDoctorAbsenceData() を呼び出します');
-    if (typeof insertDoctorAbsenceData === 'function') {
-        insertDoctorAbsenceData(ss);
-    }
-  } catch (e) {
-    Logger.log(`医師不在データの挿入処理(insertDoctorAbsenceData)の呼び出し中にエラー: ${e}`);
-    SpreadsheetApp.getUi().alert('エラー', `医師不在データの挿入処理中にエラーが発生しました: ${e.message}`, SpreadsheetApp.getUi().ButtonSet.OK);
-  }
+  
+  // 🗑️ updateUnfilledStatusWithClinicLogicAndReset_v3() の呼び出し削除
+  // 🗑️ insertDoctorAbsenceData() の呼び出し削除
+  
   Logger.log('スクリプト updateSheetRowAdjusted_CallingCellSpecificFormatting 完了');
+  ss.toast('本番シフト集計が完了しました。', '完了', 3);
 }
 
 // ------------------------------------------------------------------------------------
 // 他の関数 (clearData, applyConditionalFormatting_CellSpecific, setupDateSelection)
 // ------------------------------------------------------------------------------------
+// ★ アラートを廃止し、即時実行のトーストに変更
 function clearData() {
-  const ui = SpreadsheetApp.getUi();
-  const result = ui.alert(
-      'データの削除と書式リセット',
-      'すべてのデータを削除しますか？',
-      ui.ButtonSet.YES_NO);
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  try {
+    ss.toast('データの削除と書式リセットを開始します...', '処理開始', 2);
+    const sourceSheet = ss.getSheetByName('貼付用');
+    const targetSheet = ss.getSheetByName('確認用');
 
-  if (result == ui.Button.YES) {
-    try {
-      const ss = SpreadsheetApp.getActiveSpreadsheet();
-      const sourceSheet = ss.getSheetByName('貼付用');
-      const targetSheet = ss.getSheetByName('確認用');
-
-      let message = '';
-      if (sourceSheet) {
-        const lastRowSource = sourceSheet.getLastRow();
-        if (lastRowSource >= 3) { 
-          sourceSheet.getRange(3, 1, lastRowSource - 2, 49).clear();
-          message += '「貼付用」シートのデータと書式を削除しました。\n';
-        }
+    if (sourceSheet) {
+      const lastRowSource = sourceSheet.getLastRow();
+      if (lastRowSource >= 3) { 
+        sourceSheet.getRange(3, 1, lastRowSource - 2, 49).clear();
       }
-      if (targetSheet) {
-        const lastRowTarget = targetSheet.getLastRow();
-        if (lastRowTarget >= 2) { 
-          targetSheet.getRange(2, 1, lastRowTarget - 1, 10).clear();
-          message += '「確認用」シートのデータと書式を削除しました。';
-        }
-      }
-      ui.alert(message || '削除対象のデータがありませんでした。');
-    } catch (e) {
-      ui.alert(`データ削除中にエラーが発生しました: ${e.message}`);
     }
+    if (targetSheet) {
+      const lastRowTarget = targetSheet.getLastRow();
+      if (lastRowTarget >= 2) { 
+        targetSheet.getRange(2, 1, lastRowTarget - 1, 10).clear();
+      }
+    }
+    ss.toast('削除とリセットが完了しました。', '完了', 3);
+  } catch (e) {
+    ss.toast(`データ削除中にエラーが発生しました: ${e.message}`, 'エラー', 5);
   }
 }
 
@@ -281,18 +255,26 @@ function setupDateSelection() {
   endDate.setDate(baseDate.getDate() + 6); // 起点日から6日後（計7日間の1週間分）
 
   const weekdaysJP = ["日", "月", "火", "水", "木", "金", "土"];
-  const formattedStart = fastFormatDate(baseDate) + `（${weekdaysJP[baseDate.getDay()]}）`; // ★爆速化
-  const formattedEnd = fastFormatDate(endDate) + `（${weekdaysJP[endDate.getDay()]}）`; // ★爆速化
+  const formattedStart = fastFormatDate(baseDate) + `（${weekdaysJP[baseDate.getDay()]}）`; 
+  const formattedEnd = fastFormatDate(endDate) + `（${weekdaysJP[endDate.getDay()]}）`; 
+
+  // ★ 追加：過去の日付を除外するための基準を取得
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
 
   const lastRow = sourceSheet.getLastRow();
   let uniqueValues = [];
 
   if (lastRow >= 2) {
     const bColumnValues = sourceSheet.getRange(2, 2, lastRow - 1, 1).getValues().flat();
-    uniqueValues = [...new Set(bColumnValues.filter(Boolean))].map(dateStr => {
-      const dateObj = parseDateToSafeDateObj(dateStr); // ★強化版パース
-      return !dateObj ? dateStr : fastFormatDate(dateObj) + `（${weekdaysJP[dateObj.getDay()]}）`;
-    });
+    uniqueValues = [...new Set(bColumnValues.filter(Boolean))]
+      .map(dateStr => {
+        const dateObj = parseDateToSafeDateObj(dateStr); 
+        // ★ 追加：過去日付の場合は除外
+        if (dateObj && dateObj < todayStart) return null;
+        return !dateObj ? dateStr : fastFormatDate(dateObj) + `（${weekdaysJP[dateObj.getDay()]}）`;
+      })
+      .filter(Boolean);
   }
 
   if (!uniqueValues.includes(formattedStart)) uniqueValues.unshift(formattedStart);
@@ -305,9 +287,12 @@ function setupDateSelection() {
     .setAllowInvalid(true) 
     .build();
 
-  // ★修正: 手動で選んだ日付を維持し、空欄の場合のみ自動セットする
   const cellB2 = sheet.getRange('B2');
   const cellB4 = sheet.getRange('B4');
+  
+  // ★ 頻出エラー回避：セルの書式をテキストにし、古い規則を消去
+  cellB2.setNumberFormat('@').setDataValidation(null);
+  cellB4.setNumberFormat('@').setDataValidation(null);
   
   let currentB2 = cellB2.getValue();
   let currentB4 = cellB4.getValue();
@@ -360,7 +345,7 @@ function generateDoctorAbsenceReportWithContext() {
   const targetSheet = ss.getSheetByName("医師不在拠点");
 
   if (!sourceSheet || !targetSheet) {
-    SpreadsheetApp.getUi().alert("エラー: 「貼付用」または「医師不在拠点」シートが見つかりません。");
+    ss.toast("エラー: 「貼付用」または「医師不在拠点」シートが見つかりません。", 'エラー', 5);
     return;
   }
 
@@ -487,9 +472,8 @@ function generateDoctorAbsenceReportWithContext() {
     targetSheet.getRange(2,1).setValue("該当する不在情報はありませんでした。(今日以降)");
   }
   
-  Logger.log("続けて extractDoctorAbsenceRevised (「不在時間」シートへの出力) を実行します。");
-  extractDoctorAbsenceRevised();
-
+  // 🗑️ 削除: extractDoctorAbsenceRevised() （不在時間シート出力処理）
+  
   Logger.log("スクリプト終了: generateDoctorAbsenceReportWithContext (全処理完了)");
-  SpreadsheetApp.getUi().alert("全レポート処理完了", "「医師不在拠点」および「不在時間」シートの更新が完了しました。", SpreadsheetApp.getUi().ButtonSet.OK);
+  ss.toast("「医師不在拠点」シートの更新が完了しました。", "完了", 3);
 }
