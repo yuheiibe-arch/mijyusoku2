@@ -160,5 +160,15 @@ function updateSheetRowAdjusted_CallingCellSpecificFormatting() {
     }
   } catch (e) {}
   
+  // 🔽🔽 アプローチシート更新処理を呼び出す 🔽🔽
+  try {
+    if (typeof updateApproachSheet === 'function') {
+        updateApproachSheet();
+    }
+  } catch (e) {
+    ss.toast(`アプローチシート更新エラー: ${e.message}`, 'エラー', 5);
+  }
+  // 🔼🔼 ここまで 🔼🔼
+  
   ss.toast('本番シフト集計が完了しました。', '完了', 3);
 }
