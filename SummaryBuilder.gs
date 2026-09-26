@@ -17,6 +17,10 @@ function buildWeeklyMonthlySummaryText(params) {
   const wCooReqH = Math.round(weekly.cooReq / 60);
   const wCooFilledH = Math.round(weekly.cooFilled / 60);
   
+  // ★ f判定時間と、純粋な応募時間を算出
+  const wCooFH = Math.round(weekly.cooFMin / 60);
+  const wCooOuboH = wCooFilledH - wCooFH;
+  
   const wGapHours = Math.round(weekly.gapMin / 60);
 
   // エリアごとの集計ロジック
@@ -34,12 +38,15 @@ function buildWeeklyMonthlySummaryText(params) {
 
   let summaryText = `[info][title]週間医師充足数[/title]\n`;
   summaryText += `計測期間：${fastFormatDate(startDate)}~${fastFormatDate(endDate)}\n\n`;
-  summaryText += `１診目充足率：${wRate1st}%（応募：${wFilled1stH}h/募集：${wReq1stH}h）\n`;
+  summaryText += `１診目充足率：${wRate1st}%（充足済み：${wFilled1stH}h/募集：${wReq1stH}h）\n`;
   
   if (isExtSsLoaded) {
-    summaryText += `２診目充足率（全体）：${wRate2nd}%（応募：${wFilled2ndH}h/募集：${wReq2ndH}h）\n`;
+    summaryText += `２診目充足率（全体）：${wRate2nd}%（充足済み：${wFilled2ndH}h/募集：${wReq2ndH}h）\n`;
     if (hasCooData) {
-      summaryText += `└COO室依頼２診：${wCooRate}%（応募：${wCooFilledH}h/募集：${wCooReqH}h）\n`;
+      summaryText += `└COO室依頼２診：${wCooRate}%（充足済み：${wCooFilledH}h/募集：${wCooReqH}h）\n`;
+      summaryText += `（f判定含む依頼総数）\n`;
+      summaryText += `f判定：${wCooFH}h\n`;
+      summaryText += `応募時間数：${wCooOuboH}h\n`;
     }
   } else {
     summaryText += `２診目充足率：取得エラー\n`;
@@ -79,6 +86,10 @@ function buildWeeklyMonthlySummaryText(params) {
   const mCooReqH = Math.round(monthly.cooReq / 60);
   const mCooFilledH = Math.round(monthly.cooFilled / 60);
   
+  // ★ f判定時間と、純粋な応募時間を算出
+  const mCooFH = Math.round(monthly.cooFMin / 60);
+  const mCooOuboH = mCooFilledH - mCooFH;
+  
   const mGapHours = Math.round(monthly.gapMin / 60);
 
   const monthStartStr = fastFormatDate(new Date(startDate.getFullYear(), startDate.getMonth(), 1));
@@ -87,11 +98,14 @@ function buildWeeklyMonthlySummaryText(params) {
   summaryText += `[hr]\n`;
   summaryText += `月間集計数\n`;
   summaryText += `計測期間：${monthStartStr}~${monthEndStr}\n\n`;
-  summaryText += `１診目充足率：${mRate1st}%（応募：${mFilled1stH}h/募集：${mReq1stH}h）\n`;
-  summaryText += `２診目充足率（全体）：${mRate2nd}%（応募：${mFilled2ndH}h/募集：${mReq2ndH}h）\n`;
+  summaryText += `１診目充足率：${mRate1st}%（充足済み：${mFilled1stH}h/募集：${mReq1stH}h）\n`;
+  summaryText += `２診目充足率（全体）：${mRate2nd}%（充足済み：${mFilled2ndH}h/募集：${mReq2ndH}h）\n`;
   
   if (isExtSsLoaded && hasCooData) {
-    summaryText += `└COO室依頼２診：${mCooRate}%（応募：${mCooFilledH}h/募集：${mCooReqH}h）\n`;
+    summaryText += `└COO室依頼２診：${mCooRate}%（充足済み：${mCooFilledH}h/募集：${mCooReqH}h）\n`;
+    summaryText += `（f判定含む依頼総数）\n`;
+    summaryText += `f判定：${mCooFH}h\n`;
+    summaryText += `応募時間数：${mCooOuboH}h\n`;
   }
   
   summaryText += `医師不在時間合計：${mGapHours}h\n`;

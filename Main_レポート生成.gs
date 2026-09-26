@@ -7,12 +7,12 @@ function buildDailyAndSummaryReport(startDate, endDate, masterData, shiftData, w
 
   let weeklyReq1st = 0, weeklyFilled1st = 0, weeklyGapMin = 0;
   let weeklyReq2nd = 0, weeklyFilled2nd = 0;
-  let weeklyCooReqMin = 0, weeklyCooFilledMin = 0;
+  let weeklyCooReqMin = 0, weeklyCooFilledMin = 0, weeklyCooFMin = 0;
   let weeklyAbsenceClinics = []; 
 
   let monthlyReq1st = 0, monthlyFilled1st = 0, monthlyGapMin = 0;
   let monthlyReq2nd = 0, monthlyFilled2nd = 0;
-  let monthlyCooReqMin = 0, monthlyCooFilledMin = 0;
+  let monthlyCooReqMin = 0, monthlyCooFilledMin = 0, monthlyCooFMin = 0;
   let monthlyAbsenceCount = 0;
 
   const loopStart = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
@@ -186,6 +186,7 @@ function buildDailyAndSummaryReport(startDate, endDate, masterData, shiftData, w
 
     let dailyCooReqMin = 0;
     let dailyCooFilledMin = 0;
+    let dailyCooFMin = 0; // ★追加：日次のf時間計算用
 
     if (masterData.cooDataByDate[dateKey]) {
       const covMap = {};
@@ -220,12 +221,20 @@ function buildDailyAndSummaryReport(startDate, endDate, masterData, shiftData, w
         const clinic = String(row[0] || "").replace(/[（(]小児科[）)]/, "").trim();
         const startMin = safeParseTime(row[2]);
         const endMin = safeParseTime(row[3]);
+        const reqStr = String(row[4] || "").toLowerCase(); 
+
         if (!isNaN(startMin) && !isNaN(endMin) && startMin < endMin) {
-          dailyCooReqMin += (endMin - startMin);
-          if (covMap[clinic]) {
-            const cov = covMap[clinic];
-            for (let m = startMin; m < endMin; m++) {
-              if (cov[m] >= 2) dailyCooFilledMin++;
+          dailyCooReqMin += (endMin - startMin); 
+          
+          if (reqStr.includes('f')) {
+            dailyCooFilledMin += (endMin - startMin);
+            dailyCooFMin += (endMin - startMin); // ★ fのみの時間を計上
+          } else {
+            if (covMap[clinic]) {
+              const cov = covMap[clinic];
+              for (let m = startMin; m < endMin; m++) {
+                if (cov[m] >= 2) dailyCooFilledMin++;
+              }
             }
           }
         }
@@ -240,21 +249,29 @@ function buildDailyAndSummaryReport(startDate, endDate, masterData, shiftData, w
         weeklyFilled2nd += advMetrics.secondActualMin;
         weeklyCooReqMin += dailyCooReqMin;
         weeklyCooFilledMin += dailyCooFilledMin;
+        weeklyCooFMin += dailyCooFMin; // ★ 集計に追加
         
         if (totalRequiredMinutes > 0) {
             let entry = `[info][title]${dateTitle}[/title]`;
             if (shiftData.backupInfoMap[dateKey]) entry += shiftData.backupInfoMap[dateKey];
             entry += `[hr]\n`;
-            entry += `小児科１診目充足率：${rate}%（応募：${filledHours}h/募集：${requiredHours}h）\n`;
+            // ★ 表記を「充足済み」に変更
+            entry += `小児科１診目充足率：${rate}%（充足済み：${filledHours}h/募集：${requiredHours}h）\n`;
             
             if (masterData.isExtSsLoaded) {
-                entry += `募集全体充足率：${advMetrics.overallRate}%（応募：${advMetrics.overallActualH}h/募集：${advMetrics.overallReqH}h）\n`;
-                entry += `２診目充足率（全体）：${advMetrics.secondRate}%（応募：${advMetrics.secondActualH}h/募集：${advMetrics.secondReqH}h）\n`;
+                entry += `募集全体充足率：${advMetrics.overallRate}%（充足済み：${advMetrics.overallActualH}h/募集：${advMetrics.overallReqH}h）\n`;
+                entry += `２診目充足率（全体）：${advMetrics.secondRate}%（充足済み：${advMetrics.secondActualH}h/募集：${advMetrics.secondReqH}h）\n`;
                 if (dailyCooReqMin > 0) {
                     const dCooRate = Math.floor((dailyCooFilledMin / dailyCooReqMin) * 100);
                     const dCooReqH = Math.round(dailyCooReqMin / 60);
                     const dCooFilledH = Math.round(dailyCooFilledMin / 60);
-                    entry += `└COO室依頼２診：${dCooRate}%（応募：${dCooFilledH}h/募集：${dCooReqH}h）\n`;
+                    const dCooFH = Math.round(dailyCooFMin / 60);
+                    const dCooOuboH = dCooFilledH - dCooFH; // ★ 充足済みからfを引いて純粋な応募を算出
+                    
+                    entry += `└COO室依頼２診：${dCooRate}%（充足済み：${dCooFilledH}h/募集：${dCooReqH}h）\n`;
+                    entry += `（f判定含む依頼総数）\n`;
+                    entry += `f判定：${dCooFH}h\n`;
+                    entry += `応募時間数：${dCooOuboH}h\n`;
                 }
             }
             entry += `\n`;
@@ -278,6 +295,7 @@ function buildDailyAndSummaryReport(startDate, endDate, masterData, shiftData, w
         monthlyFilled2nd += advMetrics.secondActualMin;
         monthlyCooReqMin += dailyCooReqMin;
         monthlyCooFilledMin += dailyCooFilledMin;
+        monthlyCooFMin += dailyCooFMin; // ★ 集計に追加
     }
   }
 
@@ -289,13 +307,13 @@ function buildDailyAndSummaryReport(startDate, endDate, masterData, shiftData, w
     weekly: {
       req1st: weeklyReq1st, filled1st: weeklyFilled1st, gapMin: weeklyGapMin,
       req2nd: weeklyReq2nd, filled2nd: weeklyFilled2nd,
-      cooReq: weeklyCooReqMin, cooFilled: weeklyCooFilledMin,
+      cooReq: weeklyCooReqMin, cooFilled: weeklyCooFilledMin, cooFMin: weeklyCooFMin, // ★ パラメータ追加
       absenceClinics: weeklyAbsenceClinics
     },
     monthly: {
       req1st: monthlyReq1st, filled1st: monthlyFilled1st, gapMin: monthlyGapMin,
       req2nd: monthlyReq2nd, filled2nd: monthlyFilled2nd,
-      cooReq: monthlyCooReqMin, cooFilled: monthlyCooFilledMin,
+      cooReq: monthlyCooReqMin, cooFilled: monthlyCooFilledMin, cooFMin: monthlyCooFMin, // ★ パラメータ追加
       absenceCount: monthlyAbsenceCount
     },
     areaMap: masterData.areaMap,
