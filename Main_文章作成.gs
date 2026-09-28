@@ -57,17 +57,12 @@ function generateChatworkMessage() {
   cellB2.setNumberFormat('@').setDataValidation(null);
   cellB4.setNumberFormat('@').setDataValidation(null);
   
-  let startDateRaw = cellB2.getValue();
-  let endDateRaw = cellB4.getValue();
+  // ★変更点：セルが空かどうかに関わらず、時刻から計算した日付で強制上書きする
+  cellB2.setValue(formattedStart);
+  let startDateRaw = formattedStart;
   
-  if (!startDateRaw) {
-    cellB2.setValue(formattedStart);
-    startDateRaw = formattedStart;
-  }
-  if (!endDateRaw) {
-    cellB4.setValue(formattedEnd);
-    endDateRaw = formattedEnd;
-  }
+  cellB4.setValue(formattedEnd);
+  let endDateRaw = formattedEnd;
   
   cellB2.setDataValidation(rule);
   cellB4.setDataValidation(rule);

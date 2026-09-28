@@ -102,11 +102,9 @@ function setupDateSelection() {
   cellB2.setNumberFormat('@').setDataValidation(null);
   cellB4.setNumberFormat('@').setDataValidation(null);
   
-  let currentB2 = cellB2.getValue();
-  let currentB4 = cellB4.getValue();
-
-  if (!currentB2) cellB2.setValue(formattedStart);
-  if (!currentB4) cellB4.setValue(formattedEnd);
+  // ★変更点：前回実行時の古い日付が残っていても、強制的に新しい日付をセットする
+  cellB2.setValue(formattedStart);
+  cellB4.setValue(formattedEnd);
   
   cellB2.setDataValidation(rule);
   cellB4.setDataValidation(rule);
